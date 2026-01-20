@@ -333,8 +333,8 @@ if uploaded_file is not None:
         if label_rotation == "Vertical":
             vertical_align = 'bottom'  # Anclaje en la parte inferior del texto
             horizontal_align = 'center'
-            # Mayor offset para texto vertical (empieza desde arriba del marcador)
-            y_offset_label = padding * 2.2
+            # Offset ajustado para texto vertical
+            y_offset_label = padding * 1.8
         else:
             vertical_align = 'bottom'
             horizontal_align = 'center'
