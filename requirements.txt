@@ -1,3 +1,4 @@
 gpxpy 
 pandas 
 matplotlib
+spicy
