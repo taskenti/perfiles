@@ -301,7 +301,7 @@ if uploaded_file is not None:
 
         st.divider()
         
-        # --- EXPORTACIÓN ESTÁTICA MEJORADA ---
+        # --- EXPORTACIÓN ESTÁTICA OPTIMIZADA ---
         st.subheader("Descargar Imagen")
         
         base_height = 5
@@ -319,36 +319,39 @@ if uploaded_file is not None:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, 
                            color=fill_color, alpha=fill_alpha, zorder=2)
 
-        # Configuración para texto de waypoints
+        # Configuración para texto de waypoints - MEJORADO
         rotation_deg = 90 if label_rotation == "Vertical" else 0
         vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
         horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
-        y_offset_label = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
+        
+        # AUMENTADO: Más separación entre marcador y texto
+        if label_rotation == "Horizontal":
+            y_offset_label = padding * 1.2  # Más espacio para horizontal
+        else:
+            y_offset_label = padding * 1.5  # Más espacio para vertical
 
-        # LOCALIDADES INICIO/FIN (sin desplazamiento horizontal)
+        # LOCALIDADES INICIO/FIN - Siempre verticales
         if start_loc:
             start_ele = df[y_col].iloc[0]
             ax.plot(0, start_ele, marker='D', color='green', markersize=9, 
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Texto vertical centrado en x=0
-            ax.text(0, start_ele + y_offset_label, start_loc, 
+            ax.text(0, start_ele + padding * 1.5, start_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
-                             pad=3, boxstyle='round,pad=0.3'), zorder=5)
+                    bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
+                             pad=4, boxstyle='round,pad=0.4'), zorder=5)
 
         if end_loc:
             end_ele = df[y_col].iloc[-1]
             ax.plot(total_km, end_ele, marker='D', color='black', markersize=9,
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Texto vertical centrado en la posición final
-            ax.text(total_km, end_ele + y_offset_label, end_loc, 
+            ax.text(total_km, end_ele + padding * 1.5, end_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
-                             pad=3, boxstyle='round,pad=0.3'), zorder=5)
+                    bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
+                             pad=4, boxstyle='round,pad=0.4'), zorder=5)
 
         # WAYPOINTS INTERMEDIOS
         for wp in st.session_state.waypoints:
@@ -370,17 +373,17 @@ if uploaded_file is not None:
                     ha=horizontal_align, va=vertical_align, 
                     rotation=rotation_deg,
                     fontsize=9, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
-                             pad=3, boxstyle='round,pad=0.3'), 
+                    bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
+                             pad=4, boxstyle='round,pad=0.4'), 
                     zorder=5)
 
         # Ejes y etiquetas
         ax.set_xlabel("Distancia (km)", color=text_color, fontsize=13, fontweight='bold')
         ax.set_ylabel("Altitud (m)", color=text_color, fontsize=13, fontweight='bold')
         
-        # Márgenes mejorados
-        ax.set_ylim(min_ele - padding, max_ele + padding * 1.8)
-        ax.set_xlim(-total_km * 0.02, total_km * 1.02)  # Pequeño margen lateral
+        # AUMENTADO: Más margen superior para textos verticales
+        ax.set_ylim(min_ele - padding, max_ele + padding * 2.5)
+        ax.set_xlim(-total_km * 0.02, total_km * 1.02)
         
         ax.tick_params(colors=text_color, labelsize=10)
         
@@ -393,8 +396,9 @@ if uploaded_file is not None:
         ax.spines['bottom'].set_visible(True)
         ax.spines['left'].set_visible(True)
 
+        # MEJORADO: Rejilla más visible
         if show_grid:
-            ax.grid(True, color='#d1d5db', linestyle='-', linewidth=0.6, alpha=0.4, zorder=0)
+            ax.grid(True, color='#9ca3af', linestyle='-', linewidth=0.8, alpha=0.5, zorder=0)
 
         plt.tight_layout(pad=0.5)
 
