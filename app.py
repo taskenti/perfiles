@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io
 import re
-import textwrap  # NUEVO: Para dividir textos largos
+import textwrap
 from scipy.interpolate import make_interp_spline
 import plotly.graph_objects as go
 
@@ -14,7 +14,6 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="GPX Altimetry Studio Pro", page_icon="🏔️", layout="wide")
 
 # --- CONFIGURACIÓN DE ICONOS Y MARCADORES ---
-# Mapeo de nombre -> Emoji (para UI y Plotly)
 WAYPOINT_ICONS = {
     "📍 Genérico": "📍",
     "💧 Fuente": "💧",
@@ -29,7 +28,6 @@ WAYPOINT_ICONS = {
     "🅿️ Parking": "🅿️"
 }
 
-# Mapeo de nombre -> Estilo Matplotlib (para Exportación segura sin emojis rotos)
 MPL_STYLES = {
     "📍 Genérico": {"marker": "o", "color": "red"},
     "💧 Fuente": {"marker": "o", "color": "cyan"},
@@ -147,7 +145,7 @@ with st.sidebar:
         bg_color = st.color_picker("Fondo", "#FFFFFF")
         text_color = st.color_picker("Texto", "#374151")
         st.divider()
-        line_width = st.slider("Grosor de Línea", 0.5, 12.0, 2.0, 0.5)
+        line_width = st.slider("Grosor de Línea", 0.5, 12.0, 2.5, 0.5)
         fill_alpha = st.slider("Opacidad Relleno", 0.0, 1.0, 0.6, step=0.05)
 
     with st.expander("⚙️ Opciones del Gráfico", expanded=True):
@@ -213,7 +211,6 @@ if uploaded_file is not None:
                     st.session_state.waypoints = []
                     st.rerun()
 
-            # --- SELECTOR DE MAPA UNIFICADO ---
             st.info("Desliza para elegir la posición y añade el punto.")
             
             map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
@@ -235,13 +232,12 @@ if uploaded_file is not None:
                     map={'style': "open-street-map", 'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']}, 'zoom': 11},
                     showlegend=False, margin={'l':0, 'r':0, 'b':0, 't':0}, height=300
                 )
-                st.plotly_chart(fig_map, width="stretch")
+                st.plotly_chart(fig_map, use_container_width=True)
             
             with col_add:
-                st.write(f"**Km:** {map_km_sel}")
+                st.write(f"**Km:** {map_km_sel:.1f}")
                 st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
                 
-                # Selector de icono (Guardamos la Key para saber qué estilo usar luego)
                 map_icon_key = st.selectbox("Tipo Punto", list(WAYPOINT_ICONS.keys()), key="map_icon_sel")
                 map_icon_emoji = WAYPOINT_ICONS[map_icon_key]
                 
@@ -254,7 +250,6 @@ if uploaded_file is not None:
                     })
                     st.rerun()
 
-            # Lista de Waypoints
             if st.session_state.waypoints:
                 st.write("---")
                 cols = st.columns(4)
@@ -281,7 +276,6 @@ if uploaded_file is not None:
 
         for wp in st.session_state.waypoints:
             icon_txt = wp.get('icon', '📍')
-            # NUEVO: Divide el texto en Plotly también (<br>)
             wrapped_label_plotly = "<br>".join(textwrap.wrap(wp['label'], width=15))
             full_label = f"{icon_txt} {wrapped_label_plotly}"
             
@@ -303,11 +297,11 @@ if uploaded_file is not None:
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
             yaxis=dict(title='Altitud (m)', showgrid=show_grid, gridcolor='#eee', range=[min_ele - padding, max_ele + padding]),
         )
-        st.plotly_chart(fig_interactive, width="stretch")
+        st.plotly_chart(fig_interactive, use_container_width=True)
 
         st.divider()
         
-        # --- EXPORTACIÓN ESTÁTICA ---
+        # --- EXPORTACIÓN ESTÁTICA MEJORADA ---
         st.subheader("Descargar Imagen")
         
         base_height = 5
@@ -317,96 +311,107 @@ if uploaded_file is not None:
         fig_static.patch.set_facecolor(bg_color)
         ax.set_facecolor(bg_color)
 
-        ax.plot(df['dist'], df[y_col], color=line_color, linewidth=line_width, zorder=3)
+        # Línea del perfil con antialiasing
+        ax.plot(df['dist'], df[y_col], color=line_color, linewidth=line_width, 
+                zorder=3, solid_capstyle='round', solid_joinstyle='round')
         
         if fill_area:
-            ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=fill_alpha, zorder=2)
+            ax.fill_between(df['dist'], df[y_col], min_ele - padding, 
+                           color=fill_color, alpha=fill_alpha, zorder=2)
 
-        # Configuración común para texto de waypoints
+        # Configuración para texto de waypoints
         rotation_deg = 90 if label_rotation == "Vertical" else 0
         vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
         horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
-        y_offset_label = padding * (0.8 if label_rotation == "Horizontal" else 1.3)
+        y_offset_label = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
 
-        # 1. LOCALIDADES INICIO/FIN (SIEMPRE VERTICALES y AJUSTADAS)
+        # LOCALIDADES INICIO/FIN (sin desplazamiento horizontal)
         if start_loc:
             start_ele = df[y_col].iloc[0]
-            # Marcador
-            ax.plot(0, start_ele, marker='D', color='green', markersize=8, zorder=6)
+            ax.plot(0, start_ele, marker='D', color='green', markersize=9, 
+                   markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Texto SALIDA: Siempre vertical, desplazado un poco a la derecha (+1% distancia)
-            start_x_offset = total_km * 0.015 # Desplazamiento del 1.5%
-            
-            ax.text(start_x_offset, start_ele + y_offset_label, start_loc, 
-                    ha='center', va='bottom', rotation=90, # Forzado Vertical
+            # Texto vertical centrado en x=0
+            ax.text(0, start_ele + y_offset_label, start_loc, 
+                    ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
+                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
+                             pad=3, boxstyle='round,pad=0.3'), zorder=5)
 
         if end_loc:
             end_ele = df[y_col].iloc[-1]
-            # Marcador
-            ax.plot(total_km, end_ele, marker='D', color='black', markersize=8, zorder=6)
+            ax.plot(total_km, end_ele, marker='D', color='black', markersize=9,
+                   markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Texto LLEGADA: Siempre vertical
+            # Texto vertical centrado en la posición final
             ax.text(total_km, end_ele + y_offset_label, end_loc, 
-                    ha='center', va='bottom', rotation=90, # Forzado Vertical
+                    ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
+                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
+                             pad=3, boxstyle='round,pad=0.3'), zorder=5)
 
-        # 2. WAYPOINTS INTERMEDIOS
+        # WAYPOINTS INTERMEDIOS
         for wp in st.session_state.waypoints:
-            # Línea vertical punteada
+            # Línea vertical punteada más suave
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
-                    color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
+                    color=text_color, linestyle=':', linewidth=1.2, alpha=0.5, zorder=4)
             
             icon_key = wp.get('icon_key', "📍 Genérico")
             style = MPL_STYLES.get(icon_key, MPL_STYLES["📍 Genérico"])
             
             ax.plot(wp['km'], wp['ele'], 
                     marker=style['marker'], color=style['color'], 
-                    markersize=10, markeredgecolor='white', markeredgewidth=1,
+                    markersize=10, markeredgecolor='white', markeredgewidth=1.5,
                     zorder=6)
             
-            # NUEVO: Dividir texto largo (wrapping)
-            # Corta líneas cada 15 caracteres
             wrapped_label = "\n".join(textwrap.wrap(wp['label'], width=15))
             
             ax.text(wp['km'], wp['ele'] + y_offset_label, wrapped_label, 
                     ha=horizontal_align, va=vertical_align, 
                     rotation=rotation_deg,
-                    fontsize=10, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3, boxstyle='round,pad=0.2'), 
+                    fontsize=9, fontweight='bold', color=text_color,
+                    bbox=dict(facecolor='white', alpha=0.85, edgecolor='none', 
+                             pad=3, boxstyle='round,pad=0.3'), 
                     zorder=5)
 
-        ax.set_xlabel("Distancia (km)", color=text_color, fontsize=12, fontweight='bold')
-        ax.set_ylabel("Altitud (m)", color=text_color, fontsize=12, fontweight='bold')
+        # Ejes y etiquetas
+        ax.set_xlabel("Distancia (km)", color=text_color, fontsize=13, fontweight='bold')
+        ax.set_ylabel("Altitud (m)", color=text_color, fontsize=13, fontweight='bold')
         
-        ax.set_ylim(min_ele - padding, max_ele + padding * 1.5)
-        ax.set_xlim(0, total_km)
+        # Márgenes mejorados
+        ax.set_ylim(min_ele - padding, max_ele + padding * 1.8)
+        ax.set_xlim(-total_km * 0.02, total_km * 1.02)  # Pequeño margen lateral
         
         ax.tick_params(colors=text_color, labelsize=10)
+        
+        # Bordes limpios
         for spine in ax.spines.values():
             spine.set_edgecolor(text_color)
+            spine.set_linewidth(1.2)
             spine.set_visible(False)
         
         ax.spines['bottom'].set_visible(True)
         ax.spines['left'].set_visible(True)
 
         if show_grid:
-            ax.grid(True, color='#9ca3af', linestyle='-', linewidth=0.8, alpha=0.6, zorder=0)
+            ax.grid(True, color='#d1d5db', linestyle='-', linewidth=0.6, alpha=0.4, zorder=0)
 
-        plt.tight_layout()
+        plt.tight_layout(pad=0.5)
 
         c_d1, c_d2 = st.columns(2)
         fn = uploaded_file.name.replace('.gpx', '')
 
         buf_png = io.BytesIO()
-        fig_static.savefig(buf_png, format='png', dpi=150, bbox_inches='tight', facecolor=bg_color)
-        c_d1.download_button("💾 Descargar PNG", buf_png.getvalue(), f"{fn}_perfil.png", "image/png")
+        fig_static.savefig(buf_png, format='png', dpi=200, bbox_inches='tight', 
+                          facecolor=bg_color, edgecolor='none')
+        c_d1.download_button("💾 Descargar PNG", buf_png.getvalue(), 
+                            f"{fn}_perfil.png", "image/png")
 
         buf_jpg = io.BytesIO()
-        fig_static.savefig(buf_jpg, format='jpg', dpi=150, bbox_inches='tight', facecolor=bg_color)
-        c_d2.download_button("💾 Descargar JPG", buf_jpg.getvalue(), f"{fn}_perfil.jpg", "image/jpeg")
+        fig_static.savefig(buf_jpg, format='jpg', dpi=200, bbox_inches='tight', 
+                          facecolor=bg_color, edgecolor='none', pil_kwargs={'quality': 95})
+        c_d2.download_button("💾 Descargar JPG", buf_jpg.getvalue(), 
+                            f"{fn}_perfil.jpg", "image/jpeg")
         
         plt.close(fig_static)
 
