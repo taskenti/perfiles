@@ -115,6 +115,12 @@ with st.sidebar:
     st.header("1. Archivo y Datos")
     uploaded_file = st.file_uploader("Archivo GPX", type=['gpx'])
 
+    # NUEVO: Localidades Inicio/Fin
+    if uploaded_file:
+        st.subheader("📍 Localidades")
+        start_loc = st.text_input("Salida (Inicio)", placeholder="Ej. Madrid")
+        end_loc = st.text_input("Llegada (Fin)", placeholder="Ej. Segovia")
+
     st.header("2. Diseño")
     
     with st.expander("🎨 Colores y Estilo", expanded=True):
@@ -138,7 +144,6 @@ with st.sidebar:
         fill_area = st.checkbox("Rellenar Área", value=True)
         
         st.write("---")
-        # NUEVA OPCIÓN DE ROTACIÓN
         label_rotation = st.radio("Orientación Etiquetas", ["Horizontal", "Vertical"], index=0, horizontal=True)
         
         st.subheader("Proporción de Exportación")
@@ -181,7 +186,6 @@ if uploaded_file is not None:
                     peak_km = df.loc[peak_idx, 'dist']
                     peak_ele = df.loc[peak_idx, y_col]
                     if not any("Cima" in d['label'] for d in st.session_state.waypoints):
-                        # Usar icono de cima por defecto
                         st.session_state.waypoints.append({
                             "km": peak_km, "label": "Cima", "ele": peak_ele, "icon": "🚩"
                         })
@@ -191,61 +195,44 @@ if uploaded_file is not None:
                     st.session_state.waypoints = []
                     st.rerun()
 
-            # Formulario Manual
-            with st.form("add_waypoint_form", clear_on_submit=True):
-                c_km, c_icon, c_label, c_sub = st.columns([1, 1.5, 2, 1])
-                new_km = c_km.number_input("Km", min_value=0.0, max_value=total_km, step=0.1)
-                # SELECTOR DE ICONOS
-                selected_icon_key = c_icon.selectbox("Tipo", list(WAYPOINT_ICONS.keys()))
-                new_icon = WAYPOINT_ICONS[selected_icon_key]
+            # --- SELECTOR DE MAPA UNIFICADO ---
+            # Hemos quitado el formulario manual y dejamos el mapa como principal
+            st.info("Usa el mapa para añadir puntos de interés.")
+            
+            map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
+            idx_map = (df['dist'] - map_km_sel).abs().idxmin()
+            sel_point = df.loc[idx_map]
+            
+            col_map, col_add = st.columns([3, 1])
+            with col_map:
+                fig_map = go.Figure()
+                fig_map.add_trace(go.Scattermap(
+                    mode="lines", lon=df['lon'], lat=df['lat'],
+                    marker={'size': 10}, line={'width': 3, 'color': 'blue'}, name="Ruta"
+                ))
+                fig_map.add_trace(go.Scattermap(
+                    mode="markers", lon=[sel_point['lon']], lat=[sel_point['lat']],
+                    marker={'size': 15, 'color': 'red'}, name="Selección"
+                ))
+                fig_map.update_layout(
+                    map={'style': "open-street-map", 'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']}, 'zoom': 11},
+                    showlegend=False, margin={'l':0, 'r':0, 'b':0, 't':0}, height=300
+                )
+                st.plotly_chart(fig_map, width="stretch")
+            
+            with col_add:
+                st.write(f"**Km:** {map_km_sel}")
+                st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
+                # Selector de icono
+                map_icon_key = st.selectbox("Tipo Punto", list(WAYPOINT_ICONS.keys()), key="map_icon_sel")
+                map_icon = WAYPOINT_ICONS[map_icon_key]
+                label_map = st.text_input("Nombre Punto", value="Punto", key="map_label_in")
                 
-                new_label = c_label.text_input("Nombre")
-                submitted = c_sub.form_submit_button("Añadir")
-                
-                if submitted and new_label:
-                    idx = (df['dist'] - new_km).abs().idxmin()
-                    ele_at_point = df.loc[idx, y_col]
+                if st.button("📍 Añadir", key="btn_add_wp"):
                     st.session_state.waypoints.append({
-                        "km": new_km, "label": new_label, "ele": ele_at_point, "icon": new_icon
+                        "km": map_km_sel, "label": label_map, "ele": sel_point[y_col], "icon": map_icon
                     })
                     st.rerun()
-            
-            # Selector Visual desde Mapa
-            with st.expander("🗺️ Añadir Waypoints desde el Mapa", expanded=True):
-                map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
-                idx_map = (df['dist'] - map_km_sel).abs().idxmin()
-                sel_point = df.loc[idx_map]
-                
-                col_map, col_add = st.columns([3, 1])
-                with col_map:
-                    fig_map = go.Figure()
-                    fig_map.add_trace(go.Scattermap(
-                        mode="lines", lon=df['lon'], lat=df['lat'],
-                        marker={'size': 10}, line={'width': 3, 'color': 'blue'}, name="Ruta"
-                    ))
-                    fig_map.add_trace(go.Scattermap(
-                        mode="markers", lon=[sel_point['lon']], lat=[sel_point['lat']],
-                        marker={'size': 15, 'color': 'red'}, name="Selección"
-                    ))
-                    fig_map.update_layout(
-                        map={'style': "open-street-map", 'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']}, 'zoom': 11},
-                        showlegend=False, margin={'l':0, 'r':0, 'b':0, 't':0}, height=300
-                    )
-                    st.plotly_chart(fig_map, width="stretch")
-                
-                with col_add:
-                    st.write(f"**Km:** {map_km_sel}")
-                    st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
-                    # Selector de icono en mapa también
-                    map_icon_key = st.selectbox("Tipo Punto", list(WAYPOINT_ICONS.keys()), key="map_icon_sel")
-                    map_icon = WAYPOINT_ICONS[map_icon_key]
-                    label_map = st.text_input("Nombre Punto", value="Punto Mapa", key="map_label_in")
-                    
-                    if st.button("📍 Añadir"):
-                        st.session_state.waypoints.append({
-                            "km": map_km_sel, "label": label_map, "ele": sel_point[y_col], "icon": map_icon
-                        })
-                        st.rerun()
 
             # Lista de Waypoints
             if st.session_state.waypoints:
@@ -254,7 +241,6 @@ if uploaded_file is not None:
                 for i, wp in enumerate(st.session_state.waypoints):
                     col_idx = i % 4
                     with cols[col_idx]:
-                        # Mostrar icono + etiqueta
                         icon_display = wp.get('icon', '📍')
                         st.info(f"{icon_display} **{wp['km']:.1f}km**: {wp['label']}")
 
@@ -273,11 +259,9 @@ if uploaded_file is not None:
             fillcolor=plotly_fill_color
         ))
 
-        # Waypoints en Plotly con Icono
         for wp in st.session_state.waypoints:
             icon_txt = wp.get('icon', '📍')
             full_label = f"{icon_txt} {wp['label']}"
-            
             fig_interactive.add_trace(go.Scatter(
                 x=[wp['km']], y=[wp['ele']], mode='markers+text',
                 text=[full_label], textposition="top center",
@@ -310,29 +294,51 @@ if uploaded_file is not None:
         if fill_area:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=fill_alpha, zorder=2)
 
-        # Plot Waypoints
+        # Configuración común para texto
+        rotation_deg = 90 if label_rotation == "Vertical" else 0
+        vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
+        horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
+        y_offset_label = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
+
+        # 1. LOCALIDADES INICIO/FIN (Si existen)
+        if start_loc:
+            # Inicio (Km 0)
+            start_ele = df[y_col].iloc[0]
+            # Icono
+            ax.text(0, start_ele, "📍", ha='center', va='center', fontsize=14, zorder=6)
+            # Texto
+            ax.text(0, start_ele + y_offset_label, start_loc, 
+                    ha='left' if label_rotation == "Horizontal" else 'center',
+                    va='bottom', rotation=rotation_deg,
+                    fontsize=10, fontweight='bold', color=text_color,
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
+
+        if end_loc:
+            # Fin (Km final)
+            end_ele = df[y_col].iloc[-1]
+            # Icono
+            ax.text(total_km, end_ele, "🏁", ha='center', va='center', fontsize=14, zorder=6)
+            # Texto
+            ax.text(total_km, end_ele + y_offset_label, end_loc, 
+                    ha='right' if label_rotation == "Horizontal" else 'center',
+                    va='bottom', rotation=rotation_deg,
+                    fontsize=10, fontweight='bold', color=text_color,
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
+
+        # 2. WAYPOINTS
         for wp in st.session_state.waypoints:
-            # Línea vertical punteada
+            # Línea vertical
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
                     color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
             
-            # 1. EL PUNTO NEGRO (Marcador) - Ahora explícito
-            ax.plot(wp['km'], wp['ele'], marker='o', color=text_color, markersize=5, zorder=6)
-            
-            # Preparar etiqueta con icono
+            # ICONO (Reemplaza al punto negro)
             icon_txt = wp.get('icon', '📍')
-            full_label = f"{icon_txt} {wp['label']}"
+            # Colocamos el emoji justo en el punto de coordenada (x, y)
+            ax.text(wp['km'], wp['ele'], icon_txt, ha='center', va='center', fontsize=14, zorder=6)
             
-            # Configuración de rotación
-            rotation_deg = 90 if label_rotation == "Vertical" else 0
-            vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
-            horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
-            
-            # Offset vertical para separar texto del punto (más alto si es vertical para que no pise)
-            y_offset = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
-
-            # Etiqueta
-            ax.text(wp['km'], wp['ele'] + y_offset, full_label, 
+            # ETIQUETA (Solo texto)
+            # La ponemos un poco más arriba para que no pise al icono
+            ax.text(wp['km'], wp['ele'] + y_offset_label, wp['label'], 
                     ha=horizontal_align, va=vertical_align, 
                     rotation=rotation_deg,
                     fontsize=10, fontweight='bold', color=text_color,
@@ -342,7 +348,7 @@ if uploaded_file is not None:
         ax.set_xlabel("Distancia (km)", color=text_color, fontsize=12, fontweight='bold')
         ax.set_ylabel("Altitud (m)", color=text_color, fontsize=12, fontweight='bold')
         
-        ax.set_ylim(min_ele - padding, max_ele + padding * 1.5) # Un poco más de margen arriba para etiquetas verticales
+        ax.set_ylim(min_ele - padding, max_ele + padding * 1.5)
         ax.set_xlim(0, total_km)
         
         ax.tick_params(colors=text_color, labelsize=10)
