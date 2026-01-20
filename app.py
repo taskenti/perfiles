@@ -12,7 +12,12 @@ import plotly.graph_objects as go
 # Configuración de la página
 st.set_page_config(page_title="GPX Altimetry Studio Pro", page_icon="🏔️", layout="wide")
 
-# --- FUNCIONES DE ROBUSTEZ Y CÁLCULO ---
+# --- FUNCIONES AUXILIARES ---
+
+def hex_to_rgba(hex_code, alpha):
+    """Convierte hex (#RRGGBB) a cadena rgba(r, g, b, a) para Plotly"""
+    hex_code = hex_code.lstrip('#')
+    return f"rgba({int(hex_code[0:2], 16)}, {int(hex_code[2:4], 16)}, {int(hex_code[4:6], 16)}, {alpha})"
 
 def repair_gpx_content(content_str):
     """
@@ -134,13 +139,12 @@ with st.sidebar:
         text_color = st.color_picker("Texto", "#374151")
         
         st.divider()
-        line_width = st.slider("Grosor de Línea", 0.5, 5.0, 2.0, 0.5)
-        # NUEVO: Opacidad para ver la rejilla detrás
-        fill_alpha = st.slider("Opacidad Relleno", 0.1, 1.0, 0.6, step=0.1, help="Menor valor = más transparente")
+        # RANGO AMPLIADO: De 5.0 a 12.0
+        line_width = st.slider("Grosor de Línea", 0.5, 12.0, 2.0, 0.5)
+        fill_alpha = st.slider("Opacidad Relleno", 0.0, 1.0, 0.6, step=0.05, help="0 = Invisible, 1 = Sólido")
 
     with st.expander("⚙️ Opciones del Gráfico", expanded=True):
         smooth_curve = st.checkbox("Activar Suavizado", value=True)
-        # AJUSTADO: Rango más bajo y controlable (1 a 21)
         if smooth_curve:
             smooth_strength = st.slider("Intensidad de Suavizado", 1, 21, 5, step=2, help="Bajo (3-5) quita picos. Alto (>15) aplana la ruta.")
         else:
@@ -212,31 +216,22 @@ if uploaded_file is not None:
                     st.session_state.waypoints.append({"km": new_km, "label": new_label, "ele": ele_at_point})
                     st.rerun()
             
-            # --- NUEVO: Selector Visual desde Mapa ---
+            # --- SELECTOR VISUAL DESDE MAPA ---
             with st.expander("🗺️ Añadir Waypoints desde el Mapa", expanded=True):
                 st.write("Mueve el deslizador para localizar el punto en el mapa:")
                 
-                # Deslizador para seleccionar Km visualmente
                 map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
                 
-                # Encontrar lat/lon correspondiente al Km seleccionado
                 idx_map = (df['dist'] - map_km_sel).abs().idxmin()
                 sel_point = df.loc[idx_map]
                 
-                # Crear datos para el mapa: Track completo (azul) + Punto seleccionado (rojo grande)
-                # Streamlit map espera columnas 'lat', 'lon'. Hacemos un DF pequeño para el punto.
-                df_point = pd.DataFrame([{'lat': sel_point['lat'], 'lon': sel_point['lon']}])
-                
                 col_map, col_add = st.columns([3, 1])
                 with col_map:
-                    # Usamos st.map pasando dos capas si fuera pydeck, pero st.map simple solo acepta un DF.
-                    # Truco: Mostramos el mapa centrado en el punto.
-                    # Para mejor visualización, usamos Plotly Mapbox que permite capas.
-                    
                     fig_map = go.Figure()
                     
+                    # CORRECCIÓN DEPRECATION: scattermapbox -> scattermap
                     # Capa 1: Ruta completa
-                    fig_map.add_trace(go.Scattermapbox(
+                    fig_map.add_trace(go.Scattermap(
                         mode="lines",
                         lon=df['lon'], lat=df['lat'],
                         marker={'size': 10},
@@ -245,15 +240,16 @@ if uploaded_file is not None:
                     ))
                     
                     # Capa 2: Punto seleccionado
-                    fig_map.add_trace(go.Scattermapbox(
+                    fig_map.add_trace(go.Scattermap(
                         mode="markers",
                         lon=[sel_point['lon']], lat=[sel_point['lat']],
                         marker={'size': 15, 'color': 'red'},
                         name="Selección"
                     ))
                     
+                    # CORRECCIÓN DEPRECATION: mapbox -> map
                     fig_map.update_layout(
-                        mapbox={
+                        map={
                             'style': "open-street-map",
                             'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']},
                             'zoom': 11
@@ -262,7 +258,8 @@ if uploaded_file is not None:
                         margin={'l':0, 'r':0, 'b':0, 't':0},
                         height=300
                     )
-                    st.plotly_chart(fig_map, use_container_width=True)
+                    # CORRECCIÓN DEPRECATION: use_container_width -> width="stretch"
+                    st.plotly_chart(fig_map, width="stretch")
                 
                 with col_add:
                     st.write(f"**Km:** {map_km_sel}")
@@ -292,12 +289,14 @@ if uploaded_file is not None:
         
         fig_interactive = go.Figure()
         
+        # SOLUCIÓN OPACIDAD: Usamos rgba() en fillcolor
+        plotly_fill_color = hex_to_rgba(fill_color, fill_alpha) if fill_area else None
+
         fig_interactive.add_trace(go.Scatter(
             x=df['dist'], y=df[y_col], mode='lines',
             line=dict(color=line_color, width=line_width),
             fill='tozeroy' if fill_area else 'none',
-            fillcolor=fill_color if fill_area else None, # Nota: Plotly maneja opacidad distinto, pero es preview
-            opacity=fill_alpha if fill_area else 1
+            fillcolor=plotly_fill_color
         ))
 
         for wp in st.session_state.waypoints:
@@ -314,7 +313,8 @@ if uploaded_file is not None:
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
             yaxis=dict(title='Altitud (m)', showgrid=show_grid, gridcolor='#eee', range=[min_ele - padding, max_ele + padding]),
         )
-        st.plotly_chart(fig_interactive, use_container_width=True)
+        # CORRECCIÓN DEPRECATION
+        st.plotly_chart(fig_interactive, width="stretch")
 
         st.divider()
         
