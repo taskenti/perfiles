@@ -2,3 +2,4 @@ gpxpy
 pandas 
 matplotlib
 spicy
+plotly
