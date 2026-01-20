@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 # Configuración de la página
 st.set_page_config(page_title="GPX Altimetry Studio Pro", page_icon="🏔️", layout="wide")
 
-# --- CONFIGURACIÓN DE ICONOS Y MARCADORES ---
+# --- CONFIGURACIÓN DE ICONOS Y MARCADORES MEJORADOS ---
 WAYPOINT_ICONS = {
     "📍 Genérico": "📍",
     "💧 Fuente": "💧",
@@ -25,21 +25,28 @@ WAYPOINT_ICONS = {
     "🚩 Cima": "🚩",
     "⛰️ Puerto": "⛰️",
     "⚠️ Peligro": "⚠️",
-    "🅿️ Parking": "🅿️"
+    "🅿️ Parking": "🅿️",
+    "🌲 Bosque": "🌲",
+    "⛪ Iglesia": "⛪",
+    "🏔️ Mirador": "🏔️"
 }
 
+# Estilos profesionales para Matplotlib con gradientes visuales
 MPL_STYLES = {
-    "📍 Genérico": {"marker": "o", "color": "red"},
-    "💧 Fuente": {"marker": "o", "color": "cyan"},
-    "🏠 Refugio": {"marker": "s", "color": "brown"},
-    "🏘️ Pueblo": {"marker": "h", "color": "orange"},
-    "🌉 Puente": {"marker": "_", "color": "gray"},
-    "🥪 Avituallamiento": {"marker": "P", "color": "green"},
-    "📷 Foto": {"marker": "p", "color": "purple"},
-    "🚩 Cima": {"marker": "^", "color": "red"},
-    "⛰️ Puerto": {"marker": "D", "color": "gray"},
-    "⚠️ Peligro": {"marker": "X", "color": "gold"},
-    "🅿️ Parking": {"marker": "s", "color": "blue"}
+    "📍 Genérico": {"marker": "o", "color": "#EF4444", "size": 12, "edge": "#991B1B"},
+    "💧 Fuente": {"marker": "o", "color": "#06B6D4", "size": 12, "edge": "#0E7490"},
+    "🏠 Refugio": {"marker": "s", "color": "#92400E", "size": 13, "edge": "#451A03"},
+    "🏘️ Pueblo": {"marker": "h", "color": "#F97316", "size": 14, "edge": "#9A3412"},
+    "🌉 Puente": {"marker": "d", "color": "#64748B", "size": 12, "edge": "#334155"},
+    "🥪 Avituallamiento": {"marker": "P", "color": "#22C55E", "size": 13, "edge": "#15803D"},
+    "📷 Foto": {"marker": "p", "color": "#A855F7", "size": 12, "edge": "#6B21A8"},
+    "🚩 Cima": {"marker": "^", "color": "#DC2626", "size": 14, "edge": "#7F1D1D"},
+    "⛰️ Puerto": {"marker": "D", "color": "#64748B", "size": 13, "edge": "#1E293B"},
+    "⚠️ Peligro": {"marker": "X", "color": "#FBBF24", "size": 13, "edge": "#B45309"},
+    "🅿️ Parking": {"marker": "s", "color": "#3B82F6", "size": 12, "edge": "#1E40AF"},
+    "🌲 Bosque": {"marker": "^", "color": "#16A34A", "size": 12, "edge": "#14532D"},
+    "⛪ Iglesia": {"marker": "P", "color": "#8B5CF6", "size": 13, "edge": "#5B21B6"},
+    "🏔️ Mirador": {"marker": "*", "color": "#F59E0B", "size": 15, "edge": "#92400E"}
 }
 
 # --- FUNCIONES AUXILIARES ---
@@ -353,7 +360,7 @@ if uploaded_file is not None:
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
                              pad=4, boxstyle='round,pad=0.4'), zorder=5)
 
-        # WAYPOINTS INTERMEDIOS
+        # WAYPOINTS INTERMEDIOS - ESTILO MEJORADO
         for wp in st.session_state.waypoints:
             # Línea vertical punteada más suave
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
@@ -362,9 +369,13 @@ if uploaded_file is not None:
             icon_key = wp.get('icon_key', "📍 Genérico")
             style = MPL_STYLES.get(icon_key, MPL_STYLES["📍 Genérico"])
             
+            # Marcador con borde de color para efecto profesional
             ax.plot(wp['km'], wp['ele'], 
-                    marker=style['marker'], color=style['color'], 
-                    markersize=10, markeredgecolor='white', markeredgewidth=1.5,
+                    marker=style['marker'], 
+                    color=style['color'], 
+                    markersize=style.get('size', 12), 
+                    markeredgecolor=style.get('edge', 'white'), 
+                    markeredgewidth=2,
                     zorder=6)
             
             wrapped_label = "\n".join(textwrap.wrap(wp['label'], width=15))
