@@ -1,6 +1,7 @@
-gpxpy 
-pandas 
+streamlit
+gpxpy
+pandas
 matplotlib
-spicy
+numpy
+scipy
 plotly
-textwrap
