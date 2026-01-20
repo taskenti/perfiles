@@ -340,14 +340,14 @@ if uploaded_file is not None:
             horizontal_align = 'center'
             y_offset_label = padding * 1.2
 
-        # LOCALIDADES INICIO/FIN - Siempre verticales con mejor separación
+        # LOCALIDADES INICIO/FIN - Siempre verticales con separación ajustada
         if start_loc:
             start_ele = df[y_col].iloc[0]
             ax.plot(0, start_ele, marker='D', color='green', markersize=9, 
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Offset generoso para evitar solapamiento
-            ax.text(0, start_ele + padding * 2.5, start_loc, 
+            # Offset ajustado para evitar solapamiento sin exceso
+            ax.text(0, start_ele + padding * 2.0, start_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
@@ -358,7 +358,7 @@ if uploaded_file is not None:
             ax.plot(total_km, end_ele, marker='D', color='black', markersize=9,
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            ax.text(total_km, end_ele + padding * 2.5, end_loc, 
+            ax.text(total_km, end_ele + padding * 2.0, end_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
@@ -396,8 +396,8 @@ if uploaded_file is not None:
         ax.set_xlabel("Distancia (km)", color=text_color, fontsize=13, fontweight='bold')
         ax.set_ylabel("Altitud (m)", color=text_color, fontsize=13, fontweight='bold')
         
-        # AUMENTADO: Más margen superior para textos verticales
-        ax.set_ylim(min_ele - padding, max_ele + padding * 3.5)
+        # Margen superior optimizado para textos verticales
+        ax.set_ylim(min_ele - padding, max_ele + padding * 2.8)
         ax.set_xlim(-total_km * 0.02, total_km * 1.02)
         
         ax.tick_params(colors=text_color, labelsize=10)
