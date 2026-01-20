@@ -324,45 +324,47 @@ if uploaded_file is not None:
         
         if fill_area:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, 
-                           color=fill_color, alpha=fill_alpha, zorder=2)
+                            color=fill_color, alpha=fill_alpha, zorder=2)
 
         # Configuración para texto de waypoints - OPTIMIZADO
         rotation_deg = 90 if label_rotation == "Vertical" else 0
         
-        # Para textos verticales, el anclaje debe ser diferente
         if label_rotation == "Vertical":
-            vertical_align = 'bottom'  # Anclaje en la parte inferior del texto
+            vertical_align = 'bottom'  
             horizontal_align = 'center'
-            # Offset ajustado para texto vertical
-            y_offset_label = padding * 1.8
+            # SEPARACIÓN CORREGIDA: Mucho más cerca del punto
+            y_offset_label = padding * 0.5 
         else:
             vertical_align = 'bottom'
             horizontal_align = 'center'
-            y_offset_label = padding * 1.2
+            y_offset_label = padding * 0.5
 
-        # LOCALIDADES INICIO/FIN - Siempre verticales con separación ajustada
+        # LOCALIDADES INICIO/FIN - CORRECCIÓN DE "DESTROZO"
+        # Usamos alineación 'left' para Inicio y 'right' para Fin
+        # Esto empuja el texto hacia DENTRO del gráfico, evitando que pise el eje Y
         if start_loc:
             start_ele = df[y_col].iloc[0]
             ax.plot(0, start_ele, marker='D', color='green', markersize=9, 
-                   markeredgecolor='white', markeredgewidth=1.5, zorder=6)
+                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            # Offset ajustado para evitar solapamiento sin exceso
-            ax.text(0, start_ele + padding * 2.0, start_loc, 
-                    ha='center', va='bottom', rotation=90,
+            ax.text(0, start_ele + y_offset_label, start_loc, 
+                    ha='left',  # Alineado a la izquierda (el texto sale hacia la derecha)
+                    va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
-                             pad=4, boxstyle='round,pad=0.4'), zorder=5)
+                              pad=4, boxstyle='round,pad=0.4'), zorder=5)
 
         if end_loc:
             end_ele = df[y_col].iloc[-1]
             ax.plot(total_km, end_ele, marker='D', color='black', markersize=9,
-                   markeredgecolor='white', markeredgewidth=1.5, zorder=6)
+                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            ax.text(total_km, end_ele + padding * 2.0, end_loc, 
-                    ha='center', va='bottom', rotation=90,
+            ax.text(total_km, end_ele + y_offset_label, end_loc, 
+                    ha='right', # Alineado a la derecha (el texto sale hacia la izquierda)
+                    va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
-                             pad=4, boxstyle='round,pad=0.4'), zorder=5)
+                              pad=4, boxstyle='round,pad=0.4'), zorder=5)
 
         # WAYPOINTS INTERMEDIOS - ESTILO MEJORADO
         for wp in st.session_state.waypoints:
@@ -389,7 +391,7 @@ if uploaded_file is not None:
                     rotation=rotation_deg,
                     fontsize=9, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
-                             pad=4, boxstyle='round,pad=0.4'), 
+                              pad=4, boxstyle='round,pad=0.4'), 
                     zorder=5)
 
         # Ejes y etiquetas
@@ -398,6 +400,8 @@ if uploaded_file is not None:
         
         # Margen superior optimizado para textos verticales
         ax.set_ylim(min_ele - padding, max_ele + padding * 2.8)
+        
+        # Márgenes laterales ajustados para que quepan los marcadores de inicio/fin
         ax.set_xlim(-total_km * 0.02, total_km * 1.02)
         
         ax.tick_params(colors=text_color, labelsize=10)
@@ -424,13 +428,13 @@ if uploaded_file is not None:
         fig_static.savefig(buf_png, format='png', dpi=200, bbox_inches='tight', 
                           facecolor=bg_color, edgecolor='none')
         c_d1.download_button("💾 Descargar PNG", buf_png.getvalue(), 
-                            f"{fn}_perfil.png", "image/png")
+                             f"{fn}_perfil.png", "image/png", key="dl_png")
 
         buf_jpg = io.BytesIO()
         fig_static.savefig(buf_jpg, format='jpg', dpi=200, bbox_inches='tight', 
                           facecolor=bg_color, edgecolor='none', pil_kwargs={'quality': 95})
         c_d2.download_button("💾 Descargar JPG", buf_jpg.getvalue(), 
-                            f"{fn}_perfil.jpg", "image/jpeg")
+                             f"{fn}_perfil.jpg", "image/jpeg", key="dl_jpg")
         
         plt.close(fig_static)
 
