@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import io
 import re
+import textwrap  # NUEVO: Para dividir textos largos
 from scipy.interpolate import make_interp_spline
 import plotly.graph_objects as go
 
@@ -29,7 +30,6 @@ WAYPOINT_ICONS = {
 }
 
 # Mapeo de nombre -> Estilo Matplotlib (para Exportación segura sin emojis rotos)
-# symbol: o=circulo, ^ = triangulo, s=cuadrado, p=pentagono, h=hexagono, P=plus, X=cruz
 MPL_STYLES = {
     "📍 Genérico": {"marker": "o", "color": "red"},
     "💧 Fuente": {"marker": "o", "color": "cyan"},
@@ -161,7 +161,7 @@ with st.sidebar:
         fill_area = st.checkbox("Rellenar Área", value=True)
         
         st.write("---")
-        label_rotation = st.radio("Orientación Etiquetas", ["Horizontal", "Vertical"], index=0, horizontal=True)
+        label_rotation = st.radio("Orientación Etiquetas (Waypoints)", ["Horizontal", "Vertical"], index=0, horizontal=True)
         
         st.subheader("Proporción de Exportación")
         aspect_ratio = st.slider("Ancho vs Alto", 1.0, 10.0, 4.0, 0.5)
@@ -281,7 +281,10 @@ if uploaded_file is not None:
 
         for wp in st.session_state.waypoints:
             icon_txt = wp.get('icon', '📍')
-            full_label = f"{icon_txt} {wp['label']}"
+            # NUEVO: Divide el texto en Plotly también (<br>)
+            wrapped_label_plotly = "<br>".join(textwrap.wrap(wp['label'], width=15))
+            full_label = f"{icon_txt} {wrapped_label_plotly}"
+            
             fig_interactive.add_trace(go.Scatter(
                 x=[wp['km']], y=[wp['ele']], mode='markers+text',
                 text=[full_label], textposition="top center",
@@ -290,13 +293,11 @@ if uploaded_file is not None:
 
         padding = (max_ele - min_ele) * 0.1
         
-        # AJUSTE DE ALTURA DINÁMICO PARA SIMULAR RATIO EN PREVIEW
-        # Asumimos un ancho base de ~800px para el cálculo visual
         preview_height = int(800 / aspect_ratio)
-        if preview_height < 300: preview_height = 300 # Mínimo visible
+        if preview_height < 300: preview_height = 300 
         
         fig_interactive.update_layout(
-            height=preview_height, # Altura forzada para ver efecto panorámico
+            height=preview_height,
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
@@ -321,56 +322,56 @@ if uploaded_file is not None:
         if fill_area:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=fill_alpha, zorder=2)
 
-        # Configuración común para texto
+        # Configuración común para texto de waypoints
         rotation_deg = 90 if label_rotation == "Vertical" else 0
         vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
         horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
         y_offset_label = padding * (0.8 if label_rotation == "Horizontal" else 1.3)
 
-        # 1. LOCALIDADES INICIO/FIN (Usamos marcadores sólidos)
+        # 1. LOCALIDADES INICIO/FIN (SIEMPRE VERTICALES y AJUSTADAS)
         if start_loc:
             start_ele = df[y_col].iloc[0]
-            # Marcador de inicio
+            # Marcador
             ax.plot(0, start_ele, marker='D', color='green', markersize=8, zorder=6)
-            ax.text(0, start_ele + y_offset_label, start_loc, 
-                    ha='left' if label_rotation == "Horizontal" else 'center',
-                    va='bottom', rotation=rotation_deg,
+            
+            # Texto SALIDA: Siempre vertical, desplazado un poco a la derecha (+1% distancia)
+            start_x_offset = total_km * 0.015 # Desplazamiento del 1.5%
+            
+            ax.text(start_x_offset, start_ele + y_offset_label, start_loc, 
+                    ha='center', va='bottom', rotation=90, # Forzado Vertical
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
 
         if end_loc:
             end_ele = df[y_col].iloc[-1]
-            # Marcador de fin
+            # Marcador
             ax.plot(total_km, end_ele, marker='D', color='black', markersize=8, zorder=6)
+            
+            # Texto LLEGADA: Siempre vertical
             ax.text(total_km, end_ele + y_offset_label, end_loc, 
-                    ha='right' if label_rotation == "Horizontal" else 'center',
-                    va='bottom', rotation=rotation_deg,
+                    ha='center', va='bottom', rotation=90, # Forzado Vertical
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
 
-        # 2. WAYPOINTS
+        # 2. WAYPOINTS INTERMEDIOS
         for wp in st.session_state.waypoints:
             # Línea vertical punteada
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
                     color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
             
-            # --- SOLUCIÓN PUNTO NEGRO/EMOJI ---
-            # En lugar de texto Emoji (que falla), dibujamos un marcador geométrico
-            # Recuperamos el estilo basado en la Key guardada
             icon_key = wp.get('icon_key', "📍 Genérico")
             style = MPL_STYLES.get(icon_key, MPL_STYLES["📍 Genérico"])
             
-            # Dibujamos el marcador (icono) en la gráfica
             ax.plot(wp['km'], wp['ele'], 
-                    marker=style['marker'], 
-                    color=style['color'], 
-                    markersize=10, # Tamaño visible
-                    markeredgecolor='white', # Borde blanco para resaltar
-                    markeredgewidth=1,
+                    marker=style['marker'], color=style['color'], 
+                    markersize=10, markeredgecolor='white', markeredgewidth=1,
                     zorder=6)
             
-            # Etiqueta (Texto puro, sin emoji)
-            ax.text(wp['km'], wp['ele'] + y_offset_label, wp['label'], 
+            # NUEVO: Dividir texto largo (wrapping)
+            # Corta líneas cada 15 caracteres
+            wrapped_label = "\n".join(textwrap.wrap(wp['label'], width=15))
+            
+            ax.text(wp['km'], wp['ele'] + y_offset_label, wrapped_label, 
                     ha=horizontal_align, va=vertical_align, 
                     rotation=rotation_deg,
                     fontsize=10, fontweight='bold', color=text_color,
