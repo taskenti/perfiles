@@ -12,7 +12,8 @@ import plotly.graph_objects as go
 # Configuración de la página
 st.set_page_config(page_title="GPX Altimetry Studio Pro", page_icon="🏔️", layout="wide")
 
-# --- CONFIGURACIÓN DE ICONOS ---
+# --- CONFIGURACIÓN DE ICONOS Y MARCADORES ---
+# Mapeo de nombre -> Emoji (para UI y Plotly)
 WAYPOINT_ICONS = {
     "📍 Genérico": "📍",
     "💧 Fuente": "💧",
@@ -25,6 +26,22 @@ WAYPOINT_ICONS = {
     "⛰️ Puerto": "⛰️",
     "⚠️ Peligro": "⚠️",
     "🅿️ Parking": "🅿️"
+}
+
+# Mapeo de nombre -> Estilo Matplotlib (para Exportación segura sin emojis rotos)
+# symbol: o=circulo, ^ = triangulo, s=cuadrado, p=pentagono, h=hexagono, P=plus, X=cruz
+MPL_STYLES = {
+    "📍 Genérico": {"marker": "o", "color": "red"},
+    "💧 Fuente": {"marker": "o", "color": "cyan"},
+    "🏠 Refugio": {"marker": "s", "color": "brown"},
+    "🏘️ Pueblo": {"marker": "h", "color": "orange"},
+    "🌉 Puente": {"marker": "_", "color": "gray"},
+    "🥪 Avituallamiento": {"marker": "P", "color": "green"},
+    "📷 Foto": {"marker": "p", "color": "purple"},
+    "🚩 Cima": {"marker": "^", "color": "red"},
+    "⛰️ Puerto": {"marker": "D", "color": "gray"},
+    "⚠️ Peligro": {"marker": "X", "color": "gold"},
+    "🅿️ Parking": {"marker": "s", "color": "blue"}
 }
 
 # --- FUNCIONES AUXILIARES ---
@@ -115,7 +132,7 @@ with st.sidebar:
     st.header("1. Archivo y Datos")
     uploaded_file = st.file_uploader("Archivo GPX", type=['gpx'])
 
-    # NUEVO: Localidades Inicio/Fin
+    # Localidades Inicio/Fin
     if uploaded_file:
         st.subheader("📍 Localidades")
         start_loc = st.text_input("Salida (Inicio)", placeholder="Ej. Madrid")
@@ -187,7 +204,8 @@ if uploaded_file is not None:
                     peak_ele = df.loc[peak_idx, y_col]
                     if not any("Cima" in d['label'] for d in st.session_state.waypoints):
                         st.session_state.waypoints.append({
-                            "km": peak_km, "label": "Cima", "ele": peak_ele, "icon": "🚩"
+                            "km": peak_km, "label": "Cima", "ele": peak_ele, 
+                            "icon_key": "🚩 Cima", "icon": "🚩" 
                         })
                         st.rerun()
             with c3:
@@ -196,8 +214,7 @@ if uploaded_file is not None:
                     st.rerun()
 
             # --- SELECTOR DE MAPA UNIFICADO ---
-            # Hemos quitado el formulario manual y dejamos el mapa como principal
-            st.info("Usa el mapa para añadir puntos de interés.")
+            st.info("Desliza para elegir la posición y añade el punto.")
             
             map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
             idx_map = (df['dist'] - map_km_sel).abs().idxmin()
@@ -223,14 +240,17 @@ if uploaded_file is not None:
             with col_add:
                 st.write(f"**Km:** {map_km_sel}")
                 st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
-                # Selector de icono
+                
+                # Selector de icono (Guardamos la Key para saber qué estilo usar luego)
                 map_icon_key = st.selectbox("Tipo Punto", list(WAYPOINT_ICONS.keys()), key="map_icon_sel")
-                map_icon = WAYPOINT_ICONS[map_icon_key]
+                map_icon_emoji = WAYPOINT_ICONS[map_icon_key]
+                
                 label_map = st.text_input("Nombre Punto", value="Punto", key="map_label_in")
                 
                 if st.button("📍 Añadir", key="btn_add_wp"):
                     st.session_state.waypoints.append({
-                        "km": map_km_sel, "label": label_map, "ele": sel_point[y_col], "icon": map_icon
+                        "km": map_km_sel, "label": label_map, "ele": sel_point[y_col], 
+                        "icon": map_icon_emoji, "icon_key": map_icon_key
                     })
                     st.rerun()
 
@@ -269,7 +289,14 @@ if uploaded_file is not None:
             ))
 
         padding = (max_ele - min_ele) * 0.1
+        
+        # AJUSTE DE ALTURA DINÁMICO PARA SIMULAR RATIO EN PREVIEW
+        # Asumimos un ancho base de ~800px para el cálculo visual
+        preview_height = int(800 / aspect_ratio)
+        if preview_height < 300: preview_height = 300 # Mínimo visible
+        
         fig_interactive.update_layout(
+            height=preview_height, # Altura forzada para ver efecto panorámico
             paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
@@ -298,15 +325,13 @@ if uploaded_file is not None:
         rotation_deg = 90 if label_rotation == "Vertical" else 0
         vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
         horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
-        y_offset_label = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
+        y_offset_label = padding * (0.8 if label_rotation == "Horizontal" else 1.3)
 
-        # 1. LOCALIDADES INICIO/FIN (Si existen)
+        # 1. LOCALIDADES INICIO/FIN (Usamos marcadores sólidos)
         if start_loc:
-            # Inicio (Km 0)
             start_ele = df[y_col].iloc[0]
-            # Icono
-            ax.text(0, start_ele, "📍", ha='center', va='center', fontsize=14, zorder=6)
-            # Texto
+            # Marcador de inicio
+            ax.plot(0, start_ele, marker='D', color='green', markersize=8, zorder=6)
             ax.text(0, start_ele + y_offset_label, start_loc, 
                     ha='left' if label_rotation == "Horizontal" else 'center',
                     va='bottom', rotation=rotation_deg,
@@ -314,11 +339,9 @@ if uploaded_file is not None:
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=2), zorder=5)
 
         if end_loc:
-            # Fin (Km final)
             end_ele = df[y_col].iloc[-1]
-            # Icono
-            ax.text(total_km, end_ele, "🏁", ha='center', va='center', fontsize=14, zorder=6)
-            # Texto
+            # Marcador de fin
+            ax.plot(total_km, end_ele, marker='D', color='black', markersize=8, zorder=6)
             ax.text(total_km, end_ele + y_offset_label, end_loc, 
                     ha='right' if label_rotation == "Horizontal" else 'center',
                     va='bottom', rotation=rotation_deg,
@@ -327,17 +350,26 @@ if uploaded_file is not None:
 
         # 2. WAYPOINTS
         for wp in st.session_state.waypoints:
-            # Línea vertical
+            # Línea vertical punteada
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
                     color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
             
-            # ICONO (Reemplaza al punto negro)
-            icon_txt = wp.get('icon', '📍')
-            # Colocamos el emoji justo en el punto de coordenada (x, y)
-            ax.text(wp['km'], wp['ele'], icon_txt, ha='center', va='center', fontsize=14, zorder=6)
+            # --- SOLUCIÓN PUNTO NEGRO/EMOJI ---
+            # En lugar de texto Emoji (que falla), dibujamos un marcador geométrico
+            # Recuperamos el estilo basado en la Key guardada
+            icon_key = wp.get('icon_key', "📍 Genérico")
+            style = MPL_STYLES.get(icon_key, MPL_STYLES["📍 Genérico"])
             
-            # ETIQUETA (Solo texto)
-            # La ponemos un poco más arriba para que no pise al icono
+            # Dibujamos el marcador (icono) en la gráfica
+            ax.plot(wp['km'], wp['ele'], 
+                    marker=style['marker'], 
+                    color=style['color'], 
+                    markersize=10, # Tamaño visible
+                    markeredgecolor='white', # Borde blanco para resaltar
+                    markeredgewidth=1,
+                    zorder=6)
+            
+            # Etiqueta (Texto puro, sin emoji)
             ax.text(wp['km'], wp['ele'] + y_offset_label, wp['label'], 
                     ha=horizontal_align, va=vertical_align, 
                     rotation=rotation_deg,
