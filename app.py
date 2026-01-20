@@ -326,24 +326,28 @@ if uploaded_file is not None:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, 
                            color=fill_color, alpha=fill_alpha, zorder=2)
 
-        # Configuración para texto de waypoints - MEJORADO
+        # Configuración para texto de waypoints - OPTIMIZADO
         rotation_deg = 90 if label_rotation == "Vertical" else 0
-        vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
-        horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
         
-        # AUMENTADO: Más separación entre marcador y texto
-        if label_rotation == "Horizontal":
-            y_offset_label = padding * 1.2  # Más espacio para horizontal
+        # Para textos verticales, el anclaje debe ser diferente
+        if label_rotation == "Vertical":
+            vertical_align = 'bottom'  # Anclaje en la parte inferior del texto
+            horizontal_align = 'center'
+            # Mayor offset para texto vertical (empieza desde arriba del marcador)
+            y_offset_label = padding * 2.2
         else:
-            y_offset_label = padding * 1.5  # Más espacio para vertical
+            vertical_align = 'bottom'
+            horizontal_align = 'center'
+            y_offset_label = padding * 1.2
 
-        # LOCALIDADES INICIO/FIN - Siempre verticales
+        # LOCALIDADES INICIO/FIN - Siempre verticales con mejor separación
         if start_loc:
             start_ele = df[y_col].iloc[0]
             ax.plot(0, start_ele, marker='D', color='green', markersize=9, 
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            ax.text(0, start_ele + padding * 1.5, start_loc, 
+            # Offset generoso para evitar solapamiento
+            ax.text(0, start_ele + padding * 2.5, start_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
@@ -354,7 +358,7 @@ if uploaded_file is not None:
             ax.plot(total_km, end_ele, marker='D', color='black', markersize=9,
                    markeredgecolor='white', markeredgewidth=1.5, zorder=6)
             
-            ax.text(total_km, end_ele + padding * 1.5, end_loc, 
+            ax.text(total_km, end_ele + padding * 2.5, end_loc, 
                     ha='center', va='bottom', rotation=90,
                     fontsize=10, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.9, edgecolor='none', 
@@ -393,7 +397,7 @@ if uploaded_file is not None:
         ax.set_ylabel("Altitud (m)", color=text_color, fontsize=13, fontweight='bold')
         
         # AUMENTADO: Más margen superior para textos verticales
-        ax.set_ylim(min_ele - padding, max_ele + padding * 2.5)
+        ax.set_ylim(min_ele - padding, max_ele + padding * 3.5)
         ax.set_xlim(-total_km * 0.02, total_km * 1.02)
         
         ax.tick_params(colors=text_color, labelsize=10)
