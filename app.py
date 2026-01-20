@@ -12,6 +12,21 @@ import plotly.graph_objects as go
 # Configuración de la página
 st.set_page_config(page_title="GPX Altimetry Studio Pro", page_icon="🏔️", layout="wide")
 
+# --- CONFIGURACIÓN DE ICONOS ---
+WAYPOINT_ICONS = {
+    "📍 Genérico": "📍",
+    "💧 Fuente": "💧",
+    "🏠 Refugio": "🏠",
+    "🏘️ Pueblo": "🏘️",
+    "🌉 Puente": "🌉",
+    "🥪 Avituallamiento": "🥪",
+    "📷 Foto": "📷",
+    "🚩 Cima": "🚩",
+    "⛰️ Puerto": "⛰️",
+    "⚠️ Peligro": "⚠️",
+    "🅿️ Parking": "🅿️"
+}
+
 # --- FUNCIONES AUXILIARES ---
 
 def hex_to_rgba(hex_code, alpha):
@@ -20,20 +35,11 @@ def hex_to_rgba(hex_code, alpha):
     return f"rgba({int(hex_code[0:2], 16)}, {int(hex_code[2:4], 16)}, {int(hex_code[4:6], 16)}, {alpha})"
 
 def repair_gpx_content(content_str):
-    """
-    Intenta reparar errores comunes de XML en archivos GPX,
-    como prefijos no declarados (ej: gpxx:).
-    """
     content_str = re.sub(r'(<|/)[a-zA-Z0-9]+:', r'\1', content_str)
     return content_str
 
 def parse_gpx_robust(uploaded_file):
-    """
-    Lee el archivo GPX con manejo de errores.
-    Devuelve DataFrame y distancia total.
-    """
     content_bytes = uploaded_file.getvalue()
-    
     try:
         content_str = content_bytes.decode('utf-8')
         gpx = gpxpy.parse(content_str)
@@ -50,27 +56,18 @@ def parse_gpx_robust(uploaded_file):
     for track in gpx.tracks:
         for segment in track.segments:
             for point in segment.points:
-                points.append({
-                    'lat': point.latitude,
-                    'lon': point.longitude,
-                    'ele': point.elevation
-                })
+                points.append({'lat': point.latitude, 'lon': point.longitude, 'ele': point.elevation})
     
     if not points:
         for route in gpx.routes:
             for point in route.points:
-                 points.append({
-                    'lat': point.latitude,
-                    'lon': point.longitude,
-                    'ele': point.elevation
-                })
+                 points.append({'lat': point.latitude, 'lon': point.longitude, 'ele': point.elevation})
 
     if not points:
         st.error("El archivo GPX no contiene datos de elevación válidos.")
         return None, 0
         
     df = pd.DataFrame(points)
-    
     if df['ele'].isnull().any():
         df['ele'] = df['ele'].interpolate().fillna(0)
 
@@ -88,35 +85,25 @@ def parse_gpx_robust(uploaded_file):
     return df, total_dist
 
 def smooth_data(df, window_size=5):
-    """Suaviza la elevación usando una media móvil"""
-    # Asegurar que window_size es válido para los datos
     if len(df) < window_size:
         window_size = max(1, len(df) // 2)
         if window_size % 2 == 0: window_size += 1
-
     if window_size < 1: window_size = 1
-    
     df['ele_smooth'] = df['ele'].rolling(window=window_size, center=True, min_periods=1).mean()
     return df
 
 def calculate_stats(df, y_col='ele'):
-    """Calcula estadísticas: Desnivel, Alturas y Pendiente Máxima"""
     min_ele = df[y_col].min()
     max_ele = df[y_col].max()
-    
     threshold = 0.5 
     diffs = df[y_col].diff()
     gain = diffs[diffs > threshold].sum()
-    
     dist_diff = df['dist'].diff() * 1000
     ele_diff = df[y_col].diff()
-    
     with np.errstate(divide='ignore', invalid='ignore'):
         slopes = (ele_diff / dist_diff) * 100
-    
     valid_slopes = slopes[slopes.abs() < 35] 
     max_slope = valid_slopes.max() if not valid_slopes.empty else 0
-    
     return min_ele, max_ele, gain, max_slope
 
 # --- INTERFAZ ---
@@ -124,7 +111,6 @@ def calculate_stats(df, y_col='ele'):
 st.title("🏔️ GPX Altimetry Studio Pro")
 st.markdown("Generador profesional de perfiles altimétricos.")
 
-# Barra lateral
 with st.sidebar:
     st.header("1. Archivo y Datos")
     uploaded_file = st.file_uploader("Archivo GPX", type=['gpx'])
@@ -137,43 +123,41 @@ with st.sidebar:
         fill_color = col_c2.color_picker("Relleno", "#FCA5A5")
         bg_color = st.color_picker("Fondo", "#FFFFFF")
         text_color = st.color_picker("Texto", "#374151")
-        
         st.divider()
-        # RANGO AMPLIADO: De 5.0 a 12.0
         line_width = st.slider("Grosor de Línea", 0.5, 12.0, 2.0, 0.5)
-        fill_alpha = st.slider("Opacidad Relleno", 0.0, 1.0, 0.6, step=0.05, help="0 = Invisible, 1 = Sólido")
+        fill_alpha = st.slider("Opacidad Relleno", 0.0, 1.0, 0.6, step=0.05)
 
     with st.expander("⚙️ Opciones del Gráfico", expanded=True):
         smooth_curve = st.checkbox("Activar Suavizado", value=True)
         if smooth_curve:
-            smooth_strength = st.slider("Intensidad de Suavizado", 1, 21, 5, step=2, help="Bajo (3-5) quita picos. Alto (>15) aplana la ruta.")
+            smooth_strength = st.slider("Intensidad de Suavizado", 1, 21, 5, step=2)
         else:
             smooth_strength = 1
 
         show_grid = st.checkbox("Mostrar Rejilla", value=True)
         fill_area = st.checkbox("Rellenar Área", value=True)
         
+        st.write("---")
+        # NUEVA OPCIÓN DE ROTACIÓN
+        label_rotation = st.radio("Orientación Etiquetas", ["Horizontal", "Vertical"], index=0, horizontal=True)
+        
         st.subheader("Proporción de Exportación")
         aspect_ratio = st.slider("Ancho vs Alto", 1.0, 10.0, 4.0, 0.5)
         st.caption(f"Formato: {aspect_ratio}:1")
 
 if uploaded_file is not None:
-    # Procesamiento
     with st.spinner('Procesando ruta...'):
         df, total_km = parse_gpx_robust(uploaded_file)
     
     if df is not None:
-        # Aplicar suavizado dinámico
         if smooth_curve:
             df = smooth_data(df, window_size=smooth_strength)
             y_col = 'ele_smooth'
         else:
             y_col = 'ele'
 
-        # Stats
         min_ele, max_ele, gain, max_slope = calculate_stats(df, y_col)
 
-        # Mostrar métricas
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Distancia", f"{total_km:.2f} km")
         col2.metric("Desnivel +", f"{gain:.0f} m")
@@ -196,8 +180,11 @@ if uploaded_file is not None:
                     peak_idx = df[y_col].idxmax()
                     peak_km = df.loc[peak_idx, 'dist']
                     peak_ele = df.loc[peak_idx, y_col]
-                    if not any(d['label'] == 'Cima' for d in st.session_state.waypoints):
-                        st.session_state.waypoints.append({"km": peak_km, "label": "Cima", "ele": peak_ele})
+                    if not any("Cima" in d['label'] for d in st.session_state.waypoints):
+                        # Usar icono de cima por defecto
+                        st.session_state.waypoints.append({
+                            "km": peak_km, "label": "Cima", "ele": peak_ele, "icon": "🚩"
+                        })
                         st.rerun()
             with c3:
                 if st.button("Limpiar Puntos"):
@@ -206,70 +193,57 @@ if uploaded_file is not None:
 
             # Formulario Manual
             with st.form("add_waypoint_form", clear_on_submit=True):
-                c_km, c_label, c_sub = st.columns([1, 2, 1])
-                new_km = c_km.number_input("Km (Manual)", min_value=0.0, max_value=total_km, step=0.1)
-                new_label = c_label.text_input("Etiqueta")
+                c_km, c_icon, c_label, c_sub = st.columns([1, 1.5, 2, 1])
+                new_km = c_km.number_input("Km", min_value=0.0, max_value=total_km, step=0.1)
+                # SELECTOR DE ICONOS
+                selected_icon_key = c_icon.selectbox("Tipo", list(WAYPOINT_ICONS.keys()))
+                new_icon = WAYPOINT_ICONS[selected_icon_key]
+                
+                new_label = c_label.text_input("Nombre")
                 submitted = c_sub.form_submit_button("Añadir")
+                
                 if submitted and new_label:
                     idx = (df['dist'] - new_km).abs().idxmin()
                     ele_at_point = df.loc[idx, y_col]
-                    st.session_state.waypoints.append({"km": new_km, "label": new_label, "ele": ele_at_point})
+                    st.session_state.waypoints.append({
+                        "km": new_km, "label": new_label, "ele": ele_at_point, "icon": new_icon
+                    })
                     st.rerun()
             
-            # --- SELECTOR VISUAL DESDE MAPA ---
+            # Selector Visual desde Mapa
             with st.expander("🗺️ Añadir Waypoints desde el Mapa", expanded=True):
-                st.write("Mueve el deslizador para localizar el punto en el mapa:")
-                
                 map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
-                
                 idx_map = (df['dist'] - map_km_sel).abs().idxmin()
                 sel_point = df.loc[idx_map]
                 
                 col_map, col_add = st.columns([3, 1])
                 with col_map:
                     fig_map = go.Figure()
-                    
-                    # CORRECCIÓN DEPRECATION: scattermapbox -> scattermap
-                    # Capa 1: Ruta completa
                     fig_map.add_trace(go.Scattermap(
-                        mode="lines",
-                        lon=df['lon'], lat=df['lat'],
-                        marker={'size': 10},
-                        line={'width': 3, 'color': 'blue'},
-                        name="Ruta"
+                        mode="lines", lon=df['lon'], lat=df['lat'],
+                        marker={'size': 10}, line={'width': 3, 'color': 'blue'}, name="Ruta"
                     ))
-                    
-                    # Capa 2: Punto seleccionado
                     fig_map.add_trace(go.Scattermap(
-                        mode="markers",
-                        lon=[sel_point['lon']], lat=[sel_point['lat']],
-                        marker={'size': 15, 'color': 'red'},
-                        name="Selección"
+                        mode="markers", lon=[sel_point['lon']], lat=[sel_point['lat']],
+                        marker={'size': 15, 'color': 'red'}, name="Selección"
                     ))
-                    
-                    # CORRECCIÓN DEPRECATION: mapbox -> map
                     fig_map.update_layout(
-                        map={
-                            'style': "open-street-map",
-                            'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']},
-                            'zoom': 11
-                        },
-                        showlegend=False,
-                        margin={'l':0, 'r':0, 'b':0, 't':0},
-                        height=300
+                        map={'style': "open-street-map", 'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']}, 'zoom': 11},
+                        showlegend=False, margin={'l':0, 'r':0, 'b':0, 't':0}, height=300
                     )
-                    # CORRECCIÓN DEPRECATION: use_container_width -> width="stretch"
                     st.plotly_chart(fig_map, width="stretch")
                 
                 with col_add:
                     st.write(f"**Km:** {map_km_sel}")
                     st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
-                    label_map = st.text_input("Nombre Punto", value="Punto Mapa")
-                    if st.button("📍 Añadir este punto"):
+                    # Selector de icono en mapa también
+                    map_icon_key = st.selectbox("Tipo Punto", list(WAYPOINT_ICONS.keys()), key="map_icon_sel")
+                    map_icon = WAYPOINT_ICONS[map_icon_key]
+                    label_map = st.text_input("Nombre Punto", value="Punto Mapa", key="map_label_in")
+                    
+                    if st.button("📍 Añadir"):
                         st.session_state.waypoints.append({
-                            "km": map_km_sel,
-                            "label": label_map,
-                            "ele": sel_point[y_col]
+                            "km": map_km_sel, "label": label_map, "ele": sel_point[y_col], "icon": map_icon
                         })
                         st.rerun()
 
@@ -280,16 +254,16 @@ if uploaded_file is not None:
                 for i, wp in enumerate(st.session_state.waypoints):
                     col_idx = i % 4
                     with cols[col_idx]:
-                        st.info(f"**{wp['km']:.1f}km**: {wp['label']}")
+                        # Mostrar icono + etiqueta
+                        icon_display = wp.get('icon', '📍')
+                        st.info(f"{icon_display} **{wp['km']:.1f}km**: {wp['label']}")
 
         st.divider()
 
-        # --- VISUALIZACIÓN INTERACTIVA ---
+        # --- VISTA PREVIA INTERACTIVA ---
         st.subheader("Vista Previa Interactiva")
-        
         fig_interactive = go.Figure()
         
-        # SOLUCIÓN OPACIDAD: Usamos rgba() en fillcolor
         plotly_fill_color = hex_to_rgba(fill_color, fill_alpha) if fill_area else None
 
         fig_interactive.add_trace(go.Scatter(
@@ -299,10 +273,14 @@ if uploaded_file is not None:
             fillcolor=plotly_fill_color
         ))
 
+        # Waypoints en Plotly con Icono
         for wp in st.session_state.waypoints:
+            icon_txt = wp.get('icon', '📍')
+            full_label = f"{icon_txt} {wp['label']}"
+            
             fig_interactive.add_trace(go.Scatter(
                 x=[wp['km']], y=[wp['ele']], mode='markers+text',
-                text=[wp['label']], textposition="top center",
+                text=[full_label], textposition="top center",
                 marker=dict(color=text_color, size=10, symbol='circle'), showlegend=False
             ))
 
@@ -313,7 +291,6 @@ if uploaded_file is not None:
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
             yaxis=dict(title='Altitud (m)', showgrid=show_grid, gridcolor='#eee', range=[min_ele - padding, max_ele + padding]),
         )
-        # CORRECCIÓN DEPRECATION
         st.plotly_chart(fig_interactive, width="stretch")
 
         st.divider()
@@ -328,25 +305,44 @@ if uploaded_file is not None:
         fig_static.patch.set_facecolor(bg_color)
         ax.set_facecolor(bg_color)
 
-        # Plot Track
         ax.plot(df['dist'], df[y_col], color=line_color, linewidth=line_width, zorder=3)
         
-        # Plot Relleno con Opacidad (Transparencia)
         if fill_area:
             ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=fill_alpha, zorder=2)
 
         # Plot Waypoints
         for wp in st.session_state.waypoints:
+            # Línea vertical punteada
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
                     color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
-            ax.text(wp['km'], wp['ele'] + padding * 0.5, wp['label'], 
-                    ha='center', va='bottom', fontsize=11, fontweight='bold', color=text_color,
-                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3, boxstyle='round,pad=0.3'), zorder=5)
+            
+            # 1. EL PUNTO NEGRO (Marcador) - Ahora explícito
+            ax.plot(wp['km'], wp['ele'], marker='o', color=text_color, markersize=5, zorder=6)
+            
+            # Preparar etiqueta con icono
+            icon_txt = wp.get('icon', '📍')
+            full_label = f"{icon_txt} {wp['label']}"
+            
+            # Configuración de rotación
+            rotation_deg = 90 if label_rotation == "Vertical" else 0
+            vertical_align = 'bottom' if label_rotation == "Horizontal" else 'center'
+            horizontal_align = 'center' if label_rotation == "Horizontal" else 'left'
+            
+            # Offset vertical para separar texto del punto (más alto si es vertical para que no pise)
+            y_offset = padding * (0.6 if label_rotation == "Horizontal" else 1.2)
+
+            # Etiqueta
+            ax.text(wp['km'], wp['ele'] + y_offset, full_label, 
+                    ha=horizontal_align, va=vertical_align, 
+                    rotation=rotation_deg,
+                    fontsize=10, fontweight='bold', color=text_color,
+                    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3, boxstyle='round,pad=0.2'), 
+                    zorder=5)
 
         ax.set_xlabel("Distancia (km)", color=text_color, fontsize=12, fontweight='bold')
         ax.set_ylabel("Altitud (m)", color=text_color, fontsize=12, fontweight='bold')
         
-        ax.set_ylim(min_ele - padding, max_ele + padding)
+        ax.set_ylim(min_ele - padding, max_ele + padding * 1.5) # Un poco más de margen arriba para etiquetas verticales
         ax.set_xlim(0, total_km)
         
         ax.tick_params(colors=text_color, labelsize=10)
@@ -358,7 +354,6 @@ if uploaded_file is not None:
         ax.spines['left'].set_visible(True)
 
         if show_grid:
-            # Rejilla DETRÁS (zorder=0) pero visible gracias a la transparencia del relleno
             ax.grid(True, color='#9ca3af', linestyle='-', linewidth=0.8, alpha=0.6, zorder=0)
 
         plt.tight_layout()
