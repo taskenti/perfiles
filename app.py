@@ -401,8 +401,9 @@ if uploaded_file is not None:
         # Margen superior optimizado para textos verticales
         ax.set_ylim(min_ele - padding, max_ele + padding * 2.8)
         
-        # Márgenes laterales ajustados para que quepan los marcadores de inicio/fin
-        ax.set_xlim(-total_km * 0.02, total_km * 1.02)
+        # AJUSTE FINAL: Inicio en 0 absoluto (sin margen izquierdo)
+        # Mantenemos un pequeño margen a la derecha para la etiqueta final
+        ax.set_xlim(0, total_km * 1.02)
         
         ax.tick_params(colors=text_color, labelsize=10)
         
