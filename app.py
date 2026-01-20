@@ -84,9 +84,12 @@ def parse_gpx_robust(uploaded_file):
 
 def smooth_data(df, window_size=5):
     """Suaviza la elevación usando una media móvil"""
-    # window_size debe ser impar y mayor que 0
+    # Asegurar que window_size es válido para los datos
+    if len(df) < window_size:
+        window_size = max(1, len(df) // 2)
+        if window_size % 2 == 0: window_size += 1
+
     if window_size < 1: window_size = 1
-    if window_size % 2 == 0: window_size += 1
     
     df['ele_smooth'] = df['ele'].rolling(window=window_size, center=True, min_periods=1).mean()
     return df
@@ -96,22 +99,16 @@ def calculate_stats(df, y_col='ele'):
     min_ele = df[y_col].min()
     max_ele = df[y_col].max()
     
-    # Desnivel
     threshold = 0.5 
     diffs = df[y_col].diff()
     gain = diffs[diffs > threshold].sum()
     
-    # Pendiente (Slope) en %
-    # Pendiente = (Diferencia Altura / Diferencia Distancia) * 100
-    # Convertimos distancia de km a m (*1000)
     dist_diff = df['dist'].diff() * 1000
     ele_diff = df[y_col].diff()
     
-    # Evitamos división por cero
     with np.errstate(divide='ignore', invalid='ignore'):
         slopes = (ele_diff / dist_diff) * 100
     
-    # Filtramos pendientes irreales (>35% suele ser error de GPS o precipicio)
     valid_slopes = slopes[slopes.abs() < 35] 
     max_slope = valid_slopes.max() if not valid_slopes.empty else 0
     
@@ -129,21 +126,23 @@ with st.sidebar:
 
     st.header("2. Diseño")
     
-    with st.expander("🎨 Colores y Líneas", expanded=True):
+    with st.expander("🎨 Colores y Estilo", expanded=True):
         col_c1, col_c2 = st.columns(2)
         line_color = col_c1.color_picker("Línea", "#EF4444")
         fill_color = col_c2.color_picker("Relleno", "#FCA5A5")
         bg_color = st.color_picker("Fondo", "#FFFFFF")
         text_color = st.color_picker("Texto", "#374151")
         
-        # NUEVO: Selector de Grosor de Línea
+        st.divider()
         line_width = st.slider("Grosor de Línea", 0.5, 5.0, 2.0, 0.5)
+        # NUEVO: Opacidad para ver la rejilla detrás
+        fill_alpha = st.slider("Opacidad Relleno", 0.1, 1.0, 0.6, step=0.1, help="Menor valor = más transparente")
 
     with st.expander("⚙️ Opciones del Gráfico", expanded=True):
         smooth_curve = st.checkbox("Activar Suavizado", value=True)
-        # NUEVO: Selector de intensidad de suavizado
+        # AJUSTADO: Rango más bajo y controlable (1 a 21)
         if smooth_curve:
-            smooth_strength = st.slider("Intensidad de Suavizado", 3, 51, 15, step=2, help="Valores más altos eliminan más ruido del GPS pero pueden aplanar cimas.")
+            smooth_strength = st.slider("Intensidad de Suavizado", 1, 21, 5, step=2, help="Bajo (3-5) quita picos. Alto (>15) aplana la ruta.")
         else:
             smooth_strength = 1
 
@@ -170,66 +169,116 @@ if uploaded_file is not None:
         # Stats
         min_ele, max_ele, gain, max_slope = calculate_stats(df, y_col)
 
-        # Mostrar métricas (Añadida Pendiente Máxima)
+        # Mostrar métricas
         col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Distancia", f"{total_km:.2f} km")
         col2.metric("Desnivel +", f"{gain:.0f} m")
         col3.metric("Alt. Máx", f"{max_ele:.0f} m")
         col4.metric("Alt. Mín", f"{min_ele:.0f} m")
-        col5.metric("Pendiente Máx", f"{max_slope:.1f}%", help="Pendiente máxima estimada")
+        col5.metric("Pendiente Máx", f"{max_slope:.1f}%")
 
         st.divider()
 
         # --- GESTIÓN DE WAYPOINTS ---
+        if 'waypoints' not in st.session_state:
+            st.session_state.waypoints = []
+
         with st.container():
             c1, c2, c3 = st.columns([2, 1, 1])
             with c1:
                 st.subheader("📍 Puntos de Interés")
-            
-            # NUEVO: Función Útil 3 - Botón Auto-Detectar Cima
-            if 'waypoints' not in st.session_state:
-                st.session_state.waypoints = []
-
             with c2:
                 if st.button("🏆 Auto-Cima"):
-                    # Encontrar el índice del punto más alto
                     peak_idx = df[y_col].idxmax()
                     peak_km = df.loc[peak_idx, 'dist']
                     peak_ele = df.loc[peak_idx, y_col]
-                    
-                    # Evitar duplicados simples
                     if not any(d['label'] == 'Cima' for d in st.session_state.waypoints):
-                        st.session_state.waypoints.append({
-                            "km": peak_km,
-                            "label": "Cima",
-                            "ele": peak_ele
-                        })
+                        st.session_state.waypoints.append({"km": peak_km, "label": "Cima", "ele": peak_ele})
                         st.rerun()
-            
             with c3:
                 if st.button("Limpiar Puntos"):
                     st.session_state.waypoints = []
                     st.rerun()
 
-            # Formulario de entrada manual
+            # Formulario Manual
             with st.form("add_waypoint_form", clear_on_submit=True):
                 c_km, c_label, c_sub = st.columns([1, 2, 1])
-                new_km = c_km.number_input("Km", min_value=0.0, max_value=total_km, step=0.1)
-                new_label = c_label.text_input("Etiqueta (ej. Avituallamiento)")
+                new_km = c_km.number_input("Km (Manual)", min_value=0.0, max_value=total_km, step=0.1)
+                new_label = c_label.text_input("Etiqueta")
                 submitted = c_sub.form_submit_button("Añadir")
-                
                 if submitted and new_label:
                     idx = (df['dist'] - new_km).abs().idxmin()
                     ele_at_point = df.loc[idx, y_col]
-                    st.session_state.waypoints.append({
-                        "km": new_km,
-                        "label": new_label,
-                        "ele": ele_at_point
-                    })
+                    st.session_state.waypoints.append({"km": new_km, "label": new_label, "ele": ele_at_point})
                     st.rerun()
+            
+            # --- NUEVO: Selector Visual desde Mapa ---
+            with st.expander("🗺️ Añadir Waypoints desde el Mapa", expanded=True):
+                st.write("Mueve el deslizador para localizar el punto en el mapa:")
+                
+                # Deslizador para seleccionar Km visualmente
+                map_km_sel = st.slider("Posición en Ruta (km)", 0.0, total_km, total_km/2, 0.1, key="map_selector")
+                
+                # Encontrar lat/lon correspondiente al Km seleccionado
+                idx_map = (df['dist'] - map_km_sel).abs().idxmin()
+                sel_point = df.loc[idx_map]
+                
+                # Crear datos para el mapa: Track completo (azul) + Punto seleccionado (rojo grande)
+                # Streamlit map espera columnas 'lat', 'lon'. Hacemos un DF pequeño para el punto.
+                df_point = pd.DataFrame([{'lat': sel_point['lat'], 'lon': sel_point['lon']}])
+                
+                col_map, col_add = st.columns([3, 1])
+                with col_map:
+                    # Usamos st.map pasando dos capas si fuera pydeck, pero st.map simple solo acepta un DF.
+                    # Truco: Mostramos el mapa centrado en el punto.
+                    # Para mejor visualización, usamos Plotly Mapbox que permite capas.
+                    
+                    fig_map = go.Figure()
+                    
+                    # Capa 1: Ruta completa
+                    fig_map.add_trace(go.Scattermapbox(
+                        mode="lines",
+                        lon=df['lon'], lat=df['lat'],
+                        marker={'size': 10},
+                        line={'width': 3, 'color': 'blue'},
+                        name="Ruta"
+                    ))
+                    
+                    # Capa 2: Punto seleccionado
+                    fig_map.add_trace(go.Scattermapbox(
+                        mode="markers",
+                        lon=[sel_point['lon']], lat=[sel_point['lat']],
+                        marker={'size': 15, 'color': 'red'},
+                        name="Selección"
+                    ))
+                    
+                    fig_map.update_layout(
+                        mapbox={
+                            'style': "open-street-map",
+                            'center': {'lon': sel_point['lon'], 'lat': sel_point['lat']},
+                            'zoom': 11
+                        },
+                        showlegend=False,
+                        margin={'l':0, 'r':0, 'b':0, 't':0},
+                        height=300
+                    )
+                    st.plotly_chart(fig_map, use_container_width=True)
+                
+                with col_add:
+                    st.write(f"**Km:** {map_km_sel}")
+                    st.write(f"**Alt:** {sel_point[y_col]:.0f}m")
+                    label_map = st.text_input("Nombre Punto", value="Punto Mapa")
+                    if st.button("📍 Añadir este punto"):
+                        st.session_state.waypoints.append({
+                            "km": map_km_sel,
+                            "label": label_map,
+                            "ele": sel_point[y_col]
+                        })
+                        st.rerun()
 
+            # Lista de Waypoints
             if st.session_state.waypoints:
-                st.write("Puntos activos:")
+                st.write("---")
                 cols = st.columns(4)
                 for i, wp in enumerate(st.session_state.waypoints):
                     col_idx = i % 4
@@ -238,57 +287,38 @@ if uploaded_file is not None:
 
         st.divider()
 
-        # --- VISUALIZACIÓN INTERACTIVA (PLOTLY) ---
+        # --- VISUALIZACIÓN INTERACTIVA ---
         st.subheader("Vista Previa Interactiva")
         
         fig_interactive = go.Figure()
         
         fig_interactive.add_trace(go.Scatter(
-            x=df['dist'], 
-            y=df[y_col], 
-            mode='lines',
-            name='Perfil',
-            line=dict(color=line_color, width=line_width), # Usamos el grosor seleccionado
+            x=df['dist'], y=df[y_col], mode='lines',
+            line=dict(color=line_color, width=line_width),
             fill='tozeroy' if fill_area else 'none',
-            fillcolor=fill_color if fill_area else None
+            fillcolor=fill_color if fill_area else None, # Nota: Plotly maneja opacidad distinto, pero es preview
+            opacity=fill_alpha if fill_area else 1
         ))
 
         for wp in st.session_state.waypoints:
             fig_interactive.add_trace(go.Scatter(
-                x=[wp['km']],
-                y=[wp['ele']],
-                mode='markers+text',
-                text=[wp['label']],
-                textposition="top center",
-                marker=dict(color=text_color, size=10, symbol='circle'),
-                showlegend=False
+                x=[wp['km']], y=[wp['ele']], mode='markers+text',
+                text=[wp['label']], textposition="top center",
+                marker=dict(color=text_color, size=10, symbol='circle'), showlegend=False
             ))
-            fig_interactive.add_shape(
-                type="line",
-                x0=wp['km'], y0=min_ele, x1=wp['km'], y1=wp['ele'],
-                line=dict(color="gray", width=1, dash="dot"),
-            )
 
         padding = (max_ele - min_ele) * 0.1
-        
         fig_interactive.update_layout(
-            paper_bgcolor='rgba(0,0,0,0)',
-            plot_bgcolor='rgba(0,0,0,0)',
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
             margin=dict(l=0, r=0, t=30, b=0),
             xaxis=dict(title='Distancia (km)', showgrid=show_grid, gridcolor='#eee'),
             yaxis=dict(title='Altitud (m)', showgrid=show_grid, gridcolor='#eee', range=[min_ele - padding, max_ele + padding]),
-            hovermode="x unified"
         )
-        
         st.plotly_chart(fig_interactive, use_container_width=True)
-
-        # --- NUEVO: Función Útil 1 - Mapa ---
-        with st.expander("🗺️ Ver Mapa de la Ruta"):
-            st.map(df, latitude='lat', longitude='lon')
 
         st.divider()
         
-        # --- EXPORTACIÓN ESTÁTICA (MATPLOTLIB) ---
+        # --- EXPORTACIÓN ESTÁTICA ---
         st.subheader("Descargar Imagen")
         
         base_height = 5
@@ -298,16 +328,17 @@ if uploaded_file is not None:
         fig_static.patch.set_facecolor(bg_color)
         ax.set_facecolor(bg_color)
 
-        # Plot data usando el grosor seleccionado
+        # Plot Track
         ax.plot(df['dist'], df[y_col], color=line_color, linewidth=line_width, zorder=3)
         
+        # Plot Relleno con Opacidad (Transparencia)
         if fill_area:
-            ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=1, zorder=2)
+            ax.fill_between(df['dist'], df[y_col], min_ele - padding, color=fill_color, alpha=fill_alpha, zorder=2)
 
+        # Plot Waypoints
         for wp in st.session_state.waypoints:
             ax.plot([wp['km'], wp['km']], [min_ele - padding, wp['ele']], 
                     color=text_color, linestyle='--', linewidth=1, alpha=0.7, zorder=4)
-            
             ax.text(wp['km'], wp['ele'] + padding * 0.5, wp['label'], 
                     ha='center', va='bottom', fontsize=11, fontweight='bold', color=text_color,
                     bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3, boxstyle='round,pad=0.3'), zorder=5)
@@ -327,8 +358,8 @@ if uploaded_file is not None:
         ax.spines['left'].set_visible(True)
 
         if show_grid:
-            # NUEVO: Rejilla más visible (alpha=0.8)
-            ax.grid(True, color='#e5e7eb', linestyle='-', linewidth=0.8, alpha=0.8, zorder=0)
+            # Rejilla DETRÁS (zorder=0) pero visible gracias a la transparencia del relleno
+            ax.grid(True, color='#9ca3af', linestyle='-', linewidth=0.8, alpha=0.6, zorder=0)
 
         plt.tight_layout()
 
