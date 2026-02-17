@@ -94,12 +94,12 @@ WAYPOINT_DEFS = {
     "🏥 Primeros Aux.":   {"emoji":"🏥","marker":"+", "color":"#F43F5E","edge":"#9F1239","size":14},
 }
 
-# Paleta de pendiente: 4 categorías limpias, colores 2026
+# Paleta de pendiente: colores suaves estilo Komoot 2024
 SLOPE_PALETTE = [
-    (-99,  3, "#22C55E"),   # llano / bajadas → verde
-    (  3,  8, "#F59E0B"),   # moderado → ámbar
-    (  8, 18, "#EF4444"),   # empinado → rojo
-    ( 18, 99, "#7C3AED"),   # extremo  → violeta oscuro
+    (-99,  3, "#10B981"),   # llano / bajadas → verde esmeralda suave
+    (  3,  8, "#FCD34D"),   # moderado → ámbar cálido
+    (  8, 18, "#FB923C"),   # empinado → coral
+    ( 18, 99, "#DC2626"),   # extremo  → rojo intenso
 ]
 
 # Ventana de suavizado para el heatmap de pendiente (evita "arcoíris")
@@ -110,6 +110,54 @@ def _smoothed_slopes(dist: np.ndarray, ele: np.ndarray) -> np.ndarray:
     raw = slopes_array(dist, ele)
     w   = min(_SLOPE_SMOOTH_W, max(3, len(raw) // 50))
     return pd.Series(raw).rolling(window=w, center=True, min_periods=1).mean().to_numpy()
+
+
+def generate_palette_from_primary(primary: str) -> dict:
+    """
+    Genera una paleta completa desde un color primario.
+    Inspirado en sistemas de diseño modernos (Tailwind, Radix).
+    """
+    def hex_to_hsl(h: str):
+        h = h.strip("#")
+        r, g, b = int(h[:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255
+        mx, mn = max(r,g,b), min(r,g,b)
+        l = (mx + mn) / 2
+        if mx == mn:
+            s = h_val = 0
+        else:
+            d = mx - mn
+            s = d / (2 - mx - mn) if l > 0.5 else d / (mx + mn)
+            if mx == r:   h_val = ((g - b) / d + (6 if g < b else 0)) / 6
+            elif mx == g: h_val = ((b - r) / d + 2) / 6
+            else:         h_val = ((r - g) / d + 4) / 6
+        return h_val * 360, s * 100, l * 100
+
+    def hsl_to_hex(h, s, l):
+        h, s, l = h / 360, s / 100, l / 100
+        if s == 0:
+            r = g = b = l
+        else:
+            def hue2rgb(p, q, t):
+                if t < 0: t += 1
+                if t > 1: t -= 1
+                if t < 1/6: return p + (q - p) * 6 * t
+                if t < 1/2: return q
+                if t < 2/3: return p + (q - p) * (2/3 - t) * 6
+                return p
+            q = l * (1 + s) if l < 0.5 else l + s - l * s
+            p = 2 * l - q
+            r = hue2rgb(p, q, h + 1/3)
+            g = hue2rgb(p, q, h)
+            b = hue2rgb(p, q, h - 1/3)
+        return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+
+    h, s, l = hex_to_hsl(primary)
+    return {
+        "line":    hsl_to_hex(h, min(s, 85), max(l, 45)),           # saturado, medio-oscuro
+        "fill":    hsl_to_hex(h, max(s * 0.4, 15), min(l * 1.5, 85)), # muy desaturado, claro
+        "bg":      "#FFFFFF",
+        "text":    "#1F2937",  # gris oscuro neutro (no se toca)
+    }
 
 
 SOCIAL_SIZES = {
@@ -1292,64 +1340,31 @@ with st.sidebar:
         label_rotation = st.radio("Etiquetas waypoints", ["Horizontal","Vertical"], index=1, horizontal=True)
         aspect_ratio   = st.slider("Proporción W/H", 1.0, 10.0, 4.0, 0.5)
 
-    # ── Colores ──
-    with st.expander("🎨 Colores", expanded=False):
-        c1, c2 = st.columns(2)
-        line_color  = c1.color_picker("Línea",    st.session_state.get("_lc", "#EF4444"), key="cp_lc")
-        fill_color  = c2.color_picker("Relleno",  st.session_state.get("_fc", "#FCA5A5"), key="cp_fc")
-        bg_color    = c1.color_picker("Fondo",    st.session_state.get("_bc", "#FFFFFF"),  key="cp_bc")
-        text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
+    # ── Color principal → paleta automática ──
+    with st.expander("🎨 Color", expanded=False):
+        primary_color = st.color_picker(
+            "Color principal",
+            value=st.session_state.get("_primary", "#f5811e"),
+            key="cp_primary",
+            help="Todo el diseño se genera automáticamente desde este color"
+        )
+        st.session_state["_primary"] = primary_color
+        
+        # Generar paleta
+        palette = generate_palette_from_primary(primary_color)
+        line_color = palette["line"]
+        fill_color = palette["fill"]
+        bg_color   = palette["bg"]
+        text_color = palette["text"]
+        
+        # Controles avanzados opcionales
         line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
-        fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.01)
-        transparent_bg = st.checkbox("🪟 Fondo transparente (PNG/SVG)",
-                                      value=False,
-                                      help="Exporta sin fondo — útil para superponer sobre imágenes o webs con fondo personalizado. Solo funciona en PNG y SVG (JPEG no soporta transparencia).")
-
-    # ── Presets de estilo ──
-    with st.expander("💾 Presets de estilo", expanded=False):
-        FACTORY_PRESETS = {
-            "Coral Moderno":   dict(lc="#F43F5E", fc="#FECDD3", bc="#FFF1F2", tc="#1C1C1E"),
-            "Océano Profundo": dict(lc="#0EA5E9", fc="#BAE6FD", bc="#0F172A", tc="#E0F2FE"),
-            "Bosque Oscuro":   dict(lc="#4ADE80", fc="#166534", bc="#052E16", tc="#DCFCE7"),
-            "Arena Desierto":  dict(lc="#D97706", fc="#FDE68A", bc="#1C1917", tc="#FEF3C7"),
-            "Neón Urbano":     dict(lc="#A855F7", fc="#3B0764", bc="#09090B", tc="#E9D5FF"),
-            "Nieve Alpina":    dict(lc="#64748B", fc="#CBD5E1", bc="#F8FAFC", tc="#0F172A"),
-        }
-        if "user_presets" not in st.session_state:
-            st.session_state["user_presets"] = {}
-
-        all_presets = {"— Sin preset —": None, **FACTORY_PRESETS, **st.session_state["user_presets"]}
-        chosen = st.selectbox("Cargar preset", list(all_presets.keys()))
-        if st.button("▶ Aplicar preset") and all_presets.get(chosen):
-            p = all_presets[chosen]
-            st.session_state["_lc"] = p["lc"]
-            st.session_state["_fc"] = p["fc"]
-            st.session_state["_bc"] = p["bc"]
-            st.session_state["_tc"] = p["tc"]
-            st.rerun()
-
-        st.markdown("---")
-        new_preset_name = st.text_input("Nombre del nuevo preset", placeholder="Mi estilo",
-                                         key="new_preset_name_input")
-        if st.button("💾 Guardar estilo actual"):
-            name = new_preset_name.strip()
-            if not name:
-                st.warning("Escribe un nombre.")
-            elif name in FACTORY_PRESETS:
-                st.warning("Nombre reservado, elige otro.")
-            else:
-                st.session_state["user_presets"][name] = dict(
-                    lc=line_color, fc=fill_color, bc=bg_color, tc=text_color)
-                st.success(f"✅ «{name}» guardado")
-                st.rerun()
-
-        user_preset_names = list(st.session_state["user_presets"].keys())
-        if user_preset_names:
-            del_name = st.selectbox("Borrar preset", ["— No borrar —"] + user_preset_names,
-                                     key="del_preset_sel")
-            if st.button("🗑 Borrar") and del_name != "— No borrar —":
-                del st.session_state["user_presets"][del_name]
-                st.rerun()
+        fill_alpha  = st.slider("Opacidad relleno", 0.0, 1.0, 0.65, 0.01)
+        transparent_bg = st.checkbox(
+            "🪟 Fondo transparente (PNG/SVG)",
+            value=False,
+            help="Solo PNG y SVG. JPEG ignora esta opción."
+        )
 
     with st.expander("🌐 Embed WordPress", expanded=False):
         embed_width  = st.number_input("Ancho embed (px)", 400, 2000, 900, 50)
@@ -1765,32 +1780,36 @@ with _tab_map:
     fig_map.update_layout(
         map={"style": "open-street-map",
              "center": {"lon": sel_lon, "lat": sel_lat}, "zoom": 11},
-        showlegend=False, margin={"l":0,"r":0,"b":0,"t":0}, height=320,
+        showlegend=False, margin={"l":0,"r":0,"b":0,"t":0}, height=300,
     )
     st.plotly_chart(fig_map, use_container_width=True)
+    
+    # ── Añadir waypoint directo bajo el mapa ──
+    st.markdown("**➕ Añadir punto de interés en esta posición**")
+    _ac1, _ac2, _ac3 = st.columns([2.5, 2.5, 1])
+    _wp_type = _ac1.selectbox("Tipo", list(WAYPOINT_DEFS.keys()), key="wp_type",
+                               label_visibility="collapsed")
+    _wp_name = _ac2.text_input("Nombre", value="", placeholder="Ej: Fuente del Pino",
+                                key="wp_name", label_visibility="collapsed")
+    if _ac3.button("➕", use_container_width=True, key="btn_add",
+                   help="Añadir waypoint en el km marcado en el slider"):
+        if not _wp_name.strip():
+            st.warning("⚠️ Escribe un nombre para el punto")
+        else:
+            dup = any(abs(w["km"] - map_km_sel) < 0.05 and w["label"] == _wp_name.strip()
+                      for w in st.session_state["waypoints"])
+            if dup:
+                st.warning("⚠️ Ya existe un punto con ese nombre en esta posición")
+            else:
+                st.session_state["waypoints"].append({
+                    "km": map_km_sel, "label": _wp_name.strip(), "ele": sel_ele,
+                    "icon": WAYPOINT_DEFS[_wp_type]["emoji"], "icon_key": _wp_type,
+                })
+                st.success(f"✅ '{_wp_name}' añadido en km {map_km_sel:.1f}")
+                st.rerun()
 
 with _tab_add:
-    _map_max2  = round(float(total_km), 1)
-    _map_init2 = round(round(float(total_km / 2) / 0.1) * 0.1, 1)
-    _add_km = st.slider("📍 Posición (km)", 0.0, _map_max2, _map_init2, 0.1, key="add_km_sel")
-    _add_idx = int(np.argmin(np.abs(dist_arr - _add_km)))
-    _add_ele = float(ele_display[_add_idx])
-    st.caption(f"Altitud: **{_add_ele:.0f} m**")
-    _ac1, _ac2, _ac3 = st.columns([2, 2, 1])
-    _wp_type = _ac1.selectbox("Tipo", list(WAYPOINT_DEFS.keys()), key="wp_type")
-    _wp_name = _ac2.text_input("Nombre", "Punto", key="wp_name")
-    if _ac3.button("➕ Añadir", use_container_width=True, key="btn_add"):
-        dup = any(abs(w["km"]-_add_km) < 0.05 and w["label"] == _wp_name
-                  for w in st.session_state["waypoints"])
-        if dup:
-            st.warning("Punto duplicado.")
-        else:
-            st.session_state["waypoints"].append({
-                "km": _add_km, "label": _wp_name, "ele": _add_ele,
-                "icon": WAYPOINT_DEFS[_wp_type]["emoji"], "icon_key": _wp_type,
-            })
-            st.success(f"✅ '{_wp_name}' añadido")
-            st.rerun()
+    st.info("💡 Ahora puedes añadir waypoints directamente desde la pestaña **🗺️ Mapa**")
 
 with _tab_edit:
     if not st.session_state["waypoints"]:
