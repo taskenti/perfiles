@@ -59,6 +59,16 @@ div[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; font-weight:700; }
 .shortcode-box { background:#1e293b;color:#7dd3fc;
                  font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;
                  font-size:.8rem;padding:10px 14px;border-radius:8px;word-break:break-all; }
+/* MIDE */
+.mide-card { background:#f8fafc;border:2px solid #e2e8f0;border-radius:14px;
+             padding:18px 22px;margin:10px 0; }
+.mide-pill { display:inline-block;border-radius:50%;width:36px;height:36px;line-height:36px;
+             text-align:center;font-weight:800;font-size:1rem;color:#fff;margin:3px; }
+.mide-row  { display:flex;align-items:center;gap:12px;margin:6px 0; }
+.mide-label{ font-size:.75rem;text-transform:uppercase;letter-spacing:.07em;
+             color:#64748b;font-weight:600;min-width:110px; }
+.mide-sym  { background:#1e293b;color:#f8fafc;border-radius:4px;
+             padding:2px 7px;font-size:.85rem;font-weight:700;margin:2px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -238,7 +248,92 @@ def compute_itra(dist_km: float, gain_m: float, loss_m: float) -> dict:
     return {"ed": round(ed, 1), "category": cat[0], "badge": cat[1], "points": points}
 
 
-# ─── FEATURE 13: Detección automática de puertos Y pueblos ──────────────────
+# ─── MÓDULO MIDE ─────────────────────────────────────────────────────────────
+# Sistema de valoración de excursiones del montañismo español (MIDE)
+# Fuente: Gobierno de Aragón / PRAMES
+
+MIDE_TERRAIN_SPEEDS = {
+    "Pista / camino": 5.0,
+    "Senda":          4.0,
+    "Terreno abrupto / sin camino": 3.0,
+}
+
+MIDE_RISK_FACTORS = [
+    "Exposición a desprendimientos o aludes",
+    "Pasos que requieren el uso de manos (III o más)",
+    "Cruce de torrentes sin puente",
+    "Glaciares o neveros permanentes",
+    "Zona a >1h de auxilio organizado",
+    "Temperaturas extremas previsibles (<-10°C o >40°C)",
+    "Vientos fuertes habituales (>80 km/h)",
+    "Niebla o visibilidad reducida frecuente",
+    "Alta exposición en aristas o cornisas",
+    "Sin cobertura móvil en >50% del recorrido",
+    "Riesgo de tormenta eléctrica habitual",
+    "Terreno glaciar con riesgo de grietas",
+]
+
+MIDE_ORIENTATION_OPTS = [
+    ("1 – Caminos bien definidos, señalización completa",                     1),
+    ("2 – Sendas marcadas, alguna pérdida de señal puntual",                  2),
+    ("3 – Sendas mal definidas, orientación por mapa/GPS necesaria",          3),
+    ("4 – Sin camino, orientación continua por mapa/brújula/GPS",             4),
+    ("5 – Navegación interrumpida por obstáculos o terreno complejo",         5),
+]
+
+MIDE_DISPLACEMENT_OPTS = [
+    ("1 – Superficie lisa, sin desnivel significativo",                        1),
+    ("2 – Camino con desnivel, terreno fácil",                                 2),
+    ("3 – Senda con desnivel importante o terreno irregular",                  3),
+    ("4 – Terreno muy irregular, uso de manos puntual (I-II UIAA)",           4),
+    ("5 – Pasos de escalada continuos (III+ UIAA) o rápel necesario",         5),
+]
+
+def compute_mide_effort(gain_m: float, loss_m: float,
+                         dist_km: float, speed_kmh: float) -> dict:
+    """
+    Calcula el tiempo estimado MIDE y el nivel de Esfuerzo (1-5).
+    Fórmula oficial MIDE (Gobierno de Aragón):
+      T_h = subida/400 + bajada/600
+      T_d = distancia / velocidad_terreno
+      T_total = max(T_h, T_d) + min(T_h, T_d) / 2
+    """
+    t_h = gain_m / 400.0 + loss_m / 600.0          # horas
+    t_d = dist_km / speed_kmh                        # horas
+    t_total = max(t_h, t_d) + min(t_h, t_d) / 2.0  # horas
+
+    if   t_total < 1:  effort = 1
+    elif t_total < 3:  effort = 2
+    elif t_total < 6:  effort = 3
+    elif t_total < 10: effort = 4
+    else:              effort = 5
+
+    h = int(t_total)
+    m = int(round((t_total - h) * 60))
+    return {
+        "t_h":     round(t_h, 2),
+        "t_d":     round(t_d, 2),
+        "t_total": round(t_total, 2),
+        "hhmm":    f"{h}h {m:02d}min",
+        "effort":  effort,
+    }
+
+def mide_medio_score(n_factors: int) -> int:
+    """Convierte número de factores de riesgo en nivel de Medio (1-5)."""
+    if   n_factors == 0: return 1
+    elif n_factors <= 1: return 1
+    elif n_factors <= 3: return 2
+    elif n_factors <= 6: return 3
+    elif n_factors <= 10: return 4
+    else:                return 5
+
+def mide_score_label(score: int) -> str:
+    return ["", "Bajo", "Moderado", "Alto", "Muy alto", "Extremo"][score]
+
+def mide_score_color(score: int) -> str:
+    return ["", "#22C55E", "#84CC16", "#F59E0B", "#EF4444", "#7C3AED"][score]
+
+
 def _smooth_for_peaks(ele: np.ndarray) -> np.ndarray:
     """Suavizado estándar para find_peaks."""
     w = max(5, len(ele) // 200)
@@ -1101,11 +1196,9 @@ _itra_help = (
 row2[2].metric("🏅 ITRA ED",
                f"{itra['ed']} · {itra['category']}",
                help=_itra_help)
-row2[3].markdown(
-    f'<span class="{itra["badge"]}" title="{_itra_help}">'
-    f'{itra["category"]} · {itra["points"]} pts</span>',
-    unsafe_allow_html=True,
-)
+row2[3].metric("🏆 Puntos ITRA",
+               f"{itra['points']} pts",
+               help=_itra_help)
 st.divider()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1550,6 +1643,185 @@ if df_raw2 is not None:
     cp1, cp2 = st.columns(2)
     cp1.info(f"**Ruta 1:** {total_km:.1f} km · ↑{gain:.0f}m · ↓{loss:.0f}m · ITRA {itra['category']} ({itra['ed']} ED)")
     cp2.info(f"**Ruta 2:** {total_km2:.1f} km · ↑{gain2:.0f}m · ↓{loss2:.0f}m · ITRA {itra2['category']} ({itra2['ed']} ED)")
+
+st.divider()
+
+# ═════════════════════════════════════════════════════════════════════════════
+# FICHA MIDE  — Sistema de valoración montañismo español
+# ═════════════════════════════════════════════════════════════════════════════
+with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
+    st.markdown("**Sistema MIDE** — Modelo de Información de Excursiones (Gobierno de Aragón / PRAMES)")
+    st.caption("Los datos de distancia y desnivel se toman automáticamente del GPX cargado.")
+
+    _mc1, _mc2 = st.columns([1, 1])
+
+    # ── Tipo de recorrido ──────────────────────────────────────────────────
+    with _mc1:
+        _trip_type = st.radio(
+            "📍 Tipo de recorrido",
+            ["Ida y vuelta", "Circular", "Travesía (A→B)"],
+            horizontal=True, key="mide_trip",
+        )
+
+        # Para ida y vuelta, doble desnivel
+        if _trip_type == "Ida y vuelta":
+            _m_gain = gain * 2
+            _m_loss = loss * 2
+            _m_dist = total_km * 2
+            st.caption(f"Ida y vuelta: {_m_dist:.1f} km · ↑{_m_gain:.0f}m · ↓{_m_loss:.0f}m")
+        else:
+            _m_gain = gain
+            _m_loss = loss
+            _m_dist = total_km
+
+        # ── Tipo de terreno (afecta velocidad) ──
+        _terrain = st.selectbox(
+            "🥾 Tipo de terreno predominante",
+            list(MIDE_TERRAIN_SPEEDS.keys()), key="mide_terrain",
+        )
+        _speed = MIDE_TERRAIN_SPEEDS[_terrain]
+
+        # ── Calcular esfuerzo ──
+        _mide_e = compute_mide_effort(_m_gain, _m_loss, _m_dist, _speed)
+
+        st.markdown(f"""
+        <div class="mide-card">
+          <div class="mide-row">
+            <span class="mide-label">⏱ Tiempo estimado</span>
+            <strong style="font-size:1.2rem">{_mide_e['hhmm']}</strong>
+          </div>
+          <div class="mide-row" style="font-size:.78rem;color:#64748b;">
+            T_desnivel = {_mide_e['t_h']:.1f}h &nbsp;|&nbsp;
+            T_distancia = {_mide_e['t_d']:.1f}h
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Orientación y Desplazamiento ──────────────────────────────────────
+    with _mc2:
+        _orient_label = st.selectbox(
+            "🧭 Orientación",
+            [o[0] for o in MIDE_ORIENTATION_OPTS], key="mide_orient",
+        )
+        _orient_score = dict(MIDE_ORIENTATION_OPTS)[_orient_label]
+
+        _displac_label = st.selectbox(
+            "🦶 Desplazamiento",
+            [d[0] for d in MIDE_DISPLACEMENT_OPTS], key="mide_displac",
+        )
+        _displac_score = dict(MIDE_DISPLACEMENT_OPTS)[_displac_label]
+
+    # ── Checklist Severidad del Medio ─────────────────────────────────────
+    st.markdown("**⚠️ Factores de riesgo del medio** — Marca todos los que apliquen a esta ruta:")
+    _risk_cols = st.columns(2)
+    _selected_risks = []
+    for _ri, _rf in enumerate(MIDE_RISK_FACTORS):
+        _col = _risk_cols[_ri % 2]
+        if _col.checkbox(_rf, key=f"mide_risk_{_ri}"):
+            _selected_risks.append(_rf)
+
+    _medio_score = mide_medio_score(len(_selected_risks))
+
+    # ── Dificultades técnicas específicas ─────────────────────────────────
+    _sym_T = _displac_score >= 4
+    _sym_R = st.checkbox("🪢 Descenso en rápel necesario", key="mide_rapel")
+    _sym_N = any("nieve" in r.lower() or "glaciar" in r.lower() or "nevero" in r.lower()
+                 for r in _selected_risks)
+    _rapel_m = ""
+    _nieve_deg = ""
+    if _sym_R:
+        _rapel_m = st.number_input("Metros de rápel total", 5, 500, 30, 5, key="mide_rapel_m")
+    if _sym_N:
+        _nieve_deg = st.number_input("Inclinación máxima de nieve (°)", 15, 80, 35, 5, key="mide_nieve_deg")
+
+    # ── FICHA FINAL ───────────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 📋 Ficha MIDE generada")
+
+    _scores = {
+        "Esfuerzo":      _mide_e["effort"],
+        "Orientación":   _orient_score,
+        "Desplazamiento":_displac_score,
+        "Medio":         _medio_score,
+    }
+    _score_icons = {"Esfuerzo": "💪", "Orientación": "🧭",
+                    "Desplazamiento": "🦶", "Medio": "⚠️"}
+
+    # Fila de pills de color
+    _pill_html = '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:12px;">'
+    for _sname, _sval in _scores.items():
+        _sc = mide_score_color(_sval)
+        _pill_html += f"""
+        <div style="text-align:center;">
+          <div class="mide-pill" style="background:{_sc};">{_sval}</div>
+          <div style="font-size:.7rem;color:#64748b;margin-top:2px;">{_sname}</div>
+        </div>"""
+    _pill_html += "</div>"
+    st.markdown(_pill_html, unsafe_allow_html=True)
+
+    # Datos de referencia
+    _ref_lines = [
+        f"📏 Distancia: {_m_dist:.2f} km",
+        f"⬆️ Subida: {_m_gain:.0f} m",
+        f"⬇️ Bajada: {_m_loss:.0f} m",
+        f"⏱ Tiempo estimado: {_mide_e['hhmm']}",
+        f"🗺 Tipo: {_trip_type}",
+    ]
+    _fi1, _fi2 = st.columns([1.2, 1])
+    with _fi1:
+        for _rl in _ref_lines:
+            st.markdown(f"- {_rl}")
+
+    with _fi2:
+        st.markdown("**Niveles:**")
+        for _sname, _sval in _scores.items():
+            _sc = mide_score_color(_sval)
+            _sl_txt = mide_score_label(_sval)
+            st.markdown(
+                f'<span style="color:{_sc};font-weight:700;">{_score_icons[_sname]} '
+                f'{_sname}: {_sval} — {_sl_txt}</span>',
+                unsafe_allow_html=True,
+            )
+
+        # Símbolos técnicos
+        _syms = []
+        if _sym_T: _syms.append(f'<span class="mide-sym">T</span> Escalada/UIAA')
+        if _sym_R: _syms.append(f'<span class="mide-sym">R</span> Rápel {_rapel_m}m')
+        if _sym_N: _syms.append(f'<span class="mide-sym">N</span> Nieve {_nieve_deg}°')
+        if _syms:
+            st.markdown("**Advertencias técnicas:**")
+            for _s in _syms:
+                st.markdown(_s, unsafe_allow_html=True)
+
+    # Factores de riesgo marcados
+    if _selected_risks:
+        st.markdown(f"**Factores de riesgo ({len(_selected_risks)}):** " +
+                    " · ".join(f"_{r}_" for r in _selected_risks))
+
+    # Botón exportar ficha como texto
+    _ficha_txt = f"""FICHA MIDE — {_ct or uploaded_file.name}
+{'='*50}
+Tipo de recorrido: {_trip_type}
+Distancia: {_m_dist:.2f} km | Subida: {_m_gain:.0f}m | Bajada: {_m_loss:.0f}m
+Tiempo estimado MIDE: {_mide_e['hhmm']}
+Terreno: {_terrain}
+
+VALORACIONES MIDE
+  Esfuerzo:       {_mide_e['effort']}/5 — {mide_score_label(_mide_e['effort'])}
+  Orientación:    {_orient_score}/5 — {mide_score_label(_orient_score)}
+  Desplazamiento: {_displac_score}/5 — {mide_score_label(_displac_score)}
+  Medio:          {_medio_score}/5 — {mide_score_label(_medio_score)}
+
+{'Símbolos: ' + ' '.join(['T' if _sym_T else '', 'R' if _sym_R else '', 'N' if _sym_N else '']).strip() if any([_sym_T,_sym_R,_sym_N]) else ''}
+{'Factores de riesgo: ' + ', '.join(_selected_risks) if _selected_risks else ''}
+"""
+    st.download_button(
+        "📄 Exportar ficha MIDE (.txt)",
+        _ficha_txt.strip(),
+        file_name=f"{(uploaded_file.name or 'ruta').replace('.gpx','')}_MIDE.txt",
+        mime="text/plain",
+        key="dl_mide",
+    )
 
 st.divider()
 
