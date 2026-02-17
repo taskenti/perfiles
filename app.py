@@ -344,32 +344,51 @@ def build_mide_figure(
     rapel_m: float, nieve_deg: float,
     dist_arr, ele_display,
     waypoints: list,
+    # ── Parámetros de estilo del perfil normal ──────────────────────────
+    line_color:       str   = "#1A1A1A",
+    fill_color:       str   = "#AAAAAA",
+    bg_color:         str   = "#F2F2F2",
+    text_color:       str   = "#1A1A1A",
+    line_width:       float = 1.8,
+    fill_alpha:       float = 0.85,
+    fill_area:        bool  = True,
+    show_slope_heat:  bool  = False,
+    slope_fill_style: str   = "Relleno por pendiente (Komoot)",
+    show_grid:        bool  = True,
 ) -> plt.Figure:
     """
     Genera la ficha MIDE oficial como figura Matplotlib (PNG/JPG/SVG).
-    Reproduce el diseño de la cartografía oficial del Gobierno de Aragón.
+    Usa los mismos colores y estilo que el perfil altimétrico configurado.
     """
-    import matplotlib.patches as mpatches
-    import matplotlib.patheffects as pe
-    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
     import matplotlib.gridspec as gridspec
+    from matplotlib.patches import FancyBboxPatch
     from matplotlib.colors import LinearSegmentedColormap
 
-    # ── Dimensiones ──────────────────────────────────────────────────────
-    FW, FH = 11.5, 9.0   # pulgadas  → ~1380×1080 px a 120 dpi
+    # ── Paleta estructural de la ficha (independiente del estilo del perfil) ──
+    FW, FH  = 11.5, 9.0
     DPI     = 120
-    BG      = "#E8E8E8"   # gris claro fondo exterior
-    CARD    = "#F2F2F2"   # interior de la tarjeta
-    WHITE   = "#FFFFFF"
-    BLACK   = "#1A1A1A"
-    DGRAY   = "#4A4A4A"
-    LGRAY   = "#D0D0D0"
-    BORDER  = "#888888"
-    RED     = "#CC0000"   # color acento para alertas
+    # El fondo de la ficha usa bg_color del usuario; ajustamos el "card"
+    # ligeramente más claro/oscuro según si el fondo es oscuro o claro
+    def _is_dark(hex_c):
+        h = hex_c.strip("#")
+        if len(h) != 6: return False
+        r, g, b = int(h[:2],16), int(h[2:4],16), int(h[4:6],16)
+        return (0.299*r + 0.587*g + 0.114*b) < 128
+
+    _dark_mode = _is_dark(bg_color)
+    BG      = bg_color
+    CARD    = bg_color          # mismo fondo que el perfil normal
+    # Texto e iconos de la tabla: text_color del usuario
+    BLACK   = text_color
+    # Elementos secundarios: versión semitransparente del text_color
+    DGRAY   = text_color
+    # Bordes y rejilla: adaptados al modo oscuro/claro
+    BORDER  = "#444444" if _dark_mode else "#888888"
+    LGRAY   = "#333333" if _dark_mode else "#D0D0D0"
+    WHITE   = "#2A2A2A" if _dark_mode else "#FFFFFF"  # fondo marcadores wp
 
     fig = plt.figure(figsize=(FW, FH), dpi=DPI, facecolor=BG)
 
-    # Layout: header 14% | tabla 32% | perfil 54%
     gs = gridspec.GridSpec(
         3, 1, figure=fig,
         height_ratios=[0.13, 0.32, 0.55],
@@ -388,31 +407,31 @@ def build_mide_figure(
             sp.set_linewidth(1.5)
 
     # ════════════════════════════════════════════════════════════════════
-    # HEADER — "MIDE" + nombre ruta
+    # HEADER — "MIDE" + nombre ruta  (usa line_color como acento)
     # ════════════════════════════════════════════════════════════════════
     ax_hdr.set_xlim(0, 1); ax_hdr.set_ylim(0, 1)
     ax_hdr.axis("off")
     ax_hdr.set_facecolor(CARD)
 
-    # Rectángulo "MIDE" con borde negro grueso
     ax_hdr.add_patch(FancyBboxPatch(
         (0.01, 0.08), 0.14, 0.84,
         boxstyle="round,pad=0.01",
-        facecolor=WHITE, edgecolor=BLACK, linewidth=3,
+        facecolor=line_color, edgecolor=BLACK, linewidth=3,
         transform=ax_hdr.transAxes, zorder=2,
     ))
+    # Color del texto "MIDE": blanco si el line_color es oscuro, negro si claro
+    _mide_txt_col = "#FFFFFF" if _is_dark(line_color) else "#1A1A1A"
     ax_hdr.text(0.08, 0.5, "MIDE",
                 ha="center", va="center",
                 fontsize=34, fontweight="black",
-                color=BLACK, fontfamily="DejaVu Sans",
+                color=_mide_txt_col,
                 transform=ax_hdr.transAxes, zorder=3)
 
-    # Nombre de la ruta
     _rname = route_name or "Ruta sin nombre"
     if len(_rname) > 60: _rname = _rname[:57] + "…"
     ax_hdr.text(0.17, 0.5, _rname,
                 ha="left", va="center",
-                fontsize=13, fontweight="bold", color=DGRAY,
+                fontsize=13, fontweight="bold", color=BLACK,
                 transform=ax_hdr.transAxes)
 
     # ════════════════════════════════════════════════════════════════════
@@ -421,20 +440,11 @@ def build_mide_figure(
     ax_tbl.set_xlim(0, 1); ax_tbl.set_ylim(0, 1)
     ax_tbl.axis("off")
 
-    # Línea divisoria vertical
     ax_tbl.axvline(0.50, color=BORDER, linewidth=1.2, ymin=0.0, ymax=1.0)
-    # Líneas horizontales separadoras (5 filas en cada columna)
     N_ROWS = 5
     for r in range(N_ROWS + 1):
         y = r / N_ROWS
         ax_tbl.axhline(1 - y, color=LGRAY, linewidth=0.8, xmin=0.0, xmax=1.0)
-
-    # ── Definir contenido filas izquierda ──
-    # Col izq: (etiqueta, valor, símbolo_texto)
-    sym_extra = ""
-    if sym_T: sym_extra += "T"
-    if sym_R: sym_extra += "R"
-    if sym_N: sym_extra += "N"
 
     left_rows = [
         ("severidad del medio natural",    str(medio),        "⚠"),
@@ -442,7 +452,6 @@ def build_mide_figure(
         ("dificultad en el desplazamiento",str(desplazamiento),"⚙"),
         ("cantidad de esfuerzo necesario", str(esfuerzo),     "↻"),
     ]
-    # Quinta fila: simbología técnica
     if sym_T or sym_R or sym_N:
         tech_parts = []
         if sym_T: tech_parts.append(f"T (escalada)")
@@ -452,7 +461,6 @@ def build_mide_figure(
     else:
         left_rows.append(("dificultad técnica", "—", "△"))
 
-    # Col derecha: (icono_texto, etiqueta, valor_bold)
     right_rows = [
         ("⊙", "horario",              t_hhmm),
         ("△", "desnivel de subida",  f"{int(gain_m):,} m".replace(",",".")),
@@ -463,136 +471,128 @@ def build_mide_figure(
 
     ROW_H = 1.0 / N_ROWS
     for i, (lbl, val, sym) in enumerate(left_rows):
-        y_c = 1.0 - (i + 0.5) * ROW_H  # centro vertical de la fila
-        # Etiqueta
+        y_c = 1.0 - (i + 0.5) * ROW_H
         ax_tbl.text(0.02, y_c, lbl,
                     ha="left", va="center", fontsize=8.5, color=BLACK)
-        # Número en negrita
         ax_tbl.text(0.35, y_c, val,
-                    ha="right", va="center", fontsize=11, fontweight="bold", color=BLACK)
-        # Símbolo MIDE (aproximado con texto)
+                    ha="right", va="center", fontsize=11,
+                    fontweight="bold", color=line_color)
         ax_tbl.text(0.41, y_c, sym,
                     ha="center", va="center", fontsize=14,
-                    color=DGRAY,
+                    color=line_color,
                     bbox=dict(boxstyle="round,pad=0.3", facecolor=LGRAY,
                               edgecolor=BORDER, linewidth=1))
 
     for i, (sym, lbl, val) in enumerate(right_rows):
         y_c = 1.0 - (i + 0.5) * ROW_H
-        # Icono circular
         ax_tbl.text(0.53, y_c, sym,
-                    ha="center", va="center", fontsize=13, color=DGRAY,
+                    ha="center", va="center", fontsize=13, color=line_color,
                     bbox=dict(boxstyle="circle,pad=0.25", facecolor=LGRAY,
                               edgecolor=BORDER, linewidth=1))
-        # Etiqueta
         ax_tbl.text(0.57, y_c, lbl,
                     ha="left", va="center", fontsize=8.5, color=BLACK)
-        # Valor en negrita
         ax_tbl.text(0.98, y_c, val,
-                    ha="right", va="center", fontsize=10, fontweight="bold", color=BLACK)
+                    ha="right", va="center", fontsize=10,
+                    fontweight="bold", color=BLACK)
 
     # ════════════════════════════════════════════════════════════════════
-    # PERFIL ALTIMÉTRICO  — reproduce el diseño MIDE oficial
+    # PERFIL ALTIMÉTRICO — misma lógica que build_static_fig
     # ════════════════════════════════════════════════════════════════════
-    ax_prof.tick_params(colors=DGRAY, labelsize=8)
+    ax_prof.tick_params(colors=BLACK, labelsize=8)
     for sp in ax_prof.spines.values():
         sp.set_edgecolor(BORDER); sp.set_linewidth(1.2)
     ax_prof.set_facecolor(CARD)
 
-    # Etiqueta "perfil ────"
     ax_prof.text(0.018, 0.97, "— perfil",
                  transform=ax_prof.transAxes,
                  ha="left", va="top", fontsize=11, fontstyle="italic",
                  fontweight="bold", color=BLACK)
 
-    # Eje X: "m 0 ... N km"
-    ax_prof.set_xlabel("", labelpad=2)
     ax_prof.set_xlim(0, dist_arr[-1])
-
     xticks = np.arange(0, dist_arr[-1] + 0.01, 1.0)
     ax_prof.set_xticks(xticks)
     _xlabels = []
     for _x in xticks:
-        if _x == 0:         _xlabels.append(f"m  0")
-        elif _x == xticks[-1]: _xlabels.append(f"{int(round(_x))} km")
-        else:               _xlabels.append(str(int(round(_x))))
-    ax_prof.set_xticklabels(_xlabels, fontsize=8, color=DGRAY)
+        if _x == 0:                    _xlabels.append("m  0")
+        elif _x == xticks[-1]:         _xlabels.append(f"{int(round(_x))} km")
+        else:                          _xlabels.append(str(int(round(_x))))
+    ax_prof.set_xticklabels(_xlabels, fontsize=8, color=BLACK)
 
-    # Eje Y: altitudes en múltiplos de 200
-    _mn = ele_display.min()
-    _mx = ele_display.max()
+    _mn    = float(ele_display.min())
+    _mx    = float(ele_display.max())
     _pad_p = (_mx - _mn) * 0.18
     _y_bot = _mn - _pad_p * 0.5
-    _y_top = _mx + _pad_p * 2.2   # espacio para waypoint labels
+    _y_top = _mx + _pad_p * 2.2
     ax_prof.set_ylim(_y_bot, _y_top)
 
     _y200 = np.arange(int(_mn // 200) * 200, _mx + 200, 200)
     ax_prof.set_yticks(_y200)
     ax_prof.set_yticklabels([f"{int(y):,}".replace(",",".") for y in _y200],
-                             fontsize=8, color=DGRAY)
-    ax_prof.yaxis.set_label_coords(-0.05, 0.5)
+                             fontsize=8, color=BLACK)
 
-    # Rejilla ligera
-    ax_prof.set_axisbelow(True)
-    ax_prof.yaxis.grid(True, color=LGRAY, linewidth=0.7, linestyle="-")
-    ax_prof.xaxis.grid(True, color=LGRAY, linewidth=0.6, linestyle="-")
+    if show_grid:
+        ax_prof.set_axisbelow(True)
+        _gc = LGRAY
+        ax_prof.yaxis.grid(True, color=_gc, linewidth=0.7, linestyle="-")
+        ax_prof.xaxis.grid(True, color=_gc, linewidth=0.6, linestyle="-")
 
-    # ── Relleno degradado oscuro→claro (efecto pendiente MIDE) ──
     _base = _y_bot
-    _N    = len(dist_arr)
-    # Usamos un mapa de grises inverso: más oscuro arriba, claro en la base
-    _cmap_mide = LinearSegmentedColormap.from_list(
-        "mide_fill", ["#AAAAAA", "#1A1A1A"])
 
-    for _i in range(_N - 1):
-        _x0, _x1 = dist_arr[_i], dist_arr[_i + 1]
-        _e0, _e1 = ele_display[_i], ele_display[_i + 1]
-        _t = (_e0 - _mn) / max(_mx - _mn, 1)  # 0=min, 1=max
-        _col = _cmap_mide(_t)
-        ax_prof.fill_between(
-            [_x0, _x1], [_base, _base], [_e0, _e1],
-            color=_col, alpha=0.85, linewidth=0, zorder=2,
-        )
+    # ── Relleno: misma lógica que el perfil normal ──
+    if show_slope_heat and slope_fill_style == "Relleno por pendiente (Komoot)":
+        draw_slope_gradient_fill(ax_prof, dist_arr, ele_display, _base, fill_alpha)
+    elif show_slope_heat and slope_fill_style == "Línea coloreada por pendiente":
+        # Solo relleno plano debajo, la línea se colorea después
+        if fill_area:
+            ax_prof.fill_between(dist_arr, ele_display, _base,
+                                 color=fill_color, alpha=fill_alpha * 0.5,
+                                 linewidth=0, zorder=2)
+    elif fill_area:
+        ax_prof.fill_between(dist_arr, ele_display, _base,
+                             color=fill_color, alpha=fill_alpha,
+                             linewidth=0, zorder=2)
 
-    # Línea del perfil encima
-    ax_prof.plot(dist_arr, ele_display,
-                 color=BLACK, linewidth=1.8, zorder=3,
-                 solid_capstyle="round", solid_joinstyle="round")
+    # ── Línea del perfil ──
+    if show_slope_heat and slope_fill_style == "Línea coloreada por pendiente":
+        _seg_cols = [slope_color(s) for s in _smoothed_slopes(dist_arr, ele_display)]
+        for _i in range(len(dist_arr) - 1):
+            ax_prof.plot([dist_arr[_i], dist_arr[_i+1]],
+                         [ele_display[_i], ele_display[_i+1]],
+                         color=_seg_cols[_i], linewidth=line_width,
+                         solid_capstyle="round", zorder=3)
+    else:
+        ax_prof.plot(dist_arr, ele_display,
+                     color=line_color, linewidth=line_width, zorder=3,
+                     solid_capstyle="round", solid_joinstyle="round")
 
     # ── Waypoints ──
     for wp in waypoints:
         _xi = int(np.argmin(np.abs(dist_arr - wp["km"])))
         _xe = float(dist_arr[_xi])
         _ye = float(ele_display[_xi])
-        # Marcador círculo estilo MIDE
         ax_prof.plot(_xe, _ye, "o",
                      color=WHITE, markersize=7,
-                     markeredgecolor=BLACK, markeredgewidth=1.8, zorder=5)
-        # Línea vertical fina al eje
+                     markeredgecolor=line_color, markeredgewidth=1.8, zorder=5)
         ax_prof.plot([_xe, _xe], [_base, _ye],
-                     color=BLACK, linewidth=0.6, linestyle="--",
+                     color=line_color, linewidth=0.6, linestyle="--",
                      alpha=0.4, zorder=3)
-        # Texto del waypoint — dos líneas si es largo
-        _lbl = wp.get("label", "")
-        _lines = textwrap.wrap(_lbl, 14)
-        _txt = "\n".join(_lines[:3])
+        _lbl  = wp.get("label", "")
+        _txt  = "\n".join(textwrap.wrap(_lbl, 14)[:3])
         ax_prof.text(_xe, _ye + _pad_p * 0.55, _txt,
                      ha="center", va="bottom",
                      fontsize=7.5, fontweight="bold", color=BLACK,
-                     multialignment="center",
-                     zorder=6)
+                     multialignment="center", zorder=6)
 
-    # Leyenda "punto de interés"
     ax_prof.plot([], [], "o",
                  color=WHITE, markersize=6,
-                 markeredgecolor=BLACK, markeredgewidth=1.5,
+                 markeredgecolor=line_color, markeredgewidth=1.5,
                  label="punto de interés")
     ax_prof.legend(loc="upper left", fontsize=7.5, framealpha=0,
-                   handlelength=1, borderpad=0.3,
-                   labelcolor=DGRAY)
+                   handlelength=1, borderpad=0.3, labelcolor=BLACK)
 
     fig.tight_layout(pad=0.3)
     return fig
+
 
 def _smooth_for_peaks(ele: np.ndarray) -> np.ndarray:
     """Suavizado estándar para find_peaks."""
@@ -2070,24 +2070,35 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
 
     # Construir la figura
     _mide_fig = build_mide_figure(
-        route_name      = _ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else ""),
-        trip_type       = _trip_type,
-        dist_km         = _m_dist,
-        gain_m          = _m_gain,
-        loss_m          = _m_loss,
-        t_hhmm          = _mide_e["hhmm"],
-        medio           = _medio_score,
-        orientacion     = _orient_score,
-        desplazamiento  = _displac_score,
-        esfuerzo        = _mide_e["effort"],
-        sym_T           = _sym_T,
-        sym_R           = _sym_R,
-        sym_N           = _sym_N,
-        rapel_m         = float(_rapel_m) if _rapel_m else 0.0,
-        nieve_deg       = float(_nieve_deg) if _nieve_deg else 0.0,
-        dist_arr        = dist_arr,
-        ele_display     = ele_display,
-        waypoints       = st.session_state.get("waypoints", []),
+        route_name       = _ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else ""),
+        trip_type        = _trip_type,
+        dist_km          = _m_dist,
+        gain_m           = _m_gain,
+        loss_m           = _m_loss,
+        t_hhmm           = _mide_e["hhmm"],
+        medio            = _medio_score,
+        orientacion      = _orient_score,
+        desplazamiento   = _displac_score,
+        esfuerzo         = _mide_e["effort"],
+        sym_T            = _sym_T,
+        sym_R            = _sym_R,
+        sym_N            = _sym_N,
+        rapel_m          = float(_rapel_m) if _rapel_m else 0.0,
+        nieve_deg        = float(_nieve_deg) if _nieve_deg else 0.0,
+        dist_arr         = dist_arr,
+        ele_display      = ele_display,
+        waypoints        = st.session_state.get("waypoints", []),
+        # ── Estilo del perfil normal ──
+        line_color       = line_color,
+        fill_color       = fill_color,
+        bg_color         = bg_color,
+        text_color       = text_color,
+        line_width       = line_width,
+        fill_alpha       = fill_alpha,
+        fill_area        = fill_area,
+        show_slope_heat  = show_slope_heat,
+        slope_fill_style = slope_fill_style,
+        show_grid        = show_grid,
     )
 
     # Vista previa en Streamlit
