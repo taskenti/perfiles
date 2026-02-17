@@ -1909,6 +1909,12 @@ st.divider()
 # ═════════════════════════════════════════════════════════════════════════════
 # FICHA MIDE  — Sistema de valoración montañismo español
 # ═════════════════════════════════════════════════════════════════════════════
+# Variables de localidades / título definidas aquí de forma defensiva
+# (pueden no existir si el usuario no las ha rellenado en la sidebar)
+_ct  = chart_title if "chart_title" in dir() else ""
+_sl  = start_loc   if "start_loc"   in dir() else ""
+_el  = end_loc     if "end_loc"     in dir() else ""
+
 with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
     st.markdown("**Sistema MIDE** — Modelo de Información de Excursiones (Gobierno de Aragón / PRAMES)")
     st.caption("Los datos de distancia y desnivel se toman automáticamente del GPX cargado.")
@@ -2167,10 +2173,6 @@ st.markdown('<div class="sec">💾 Exportar Imagen</div>', unsafe_allow_html=Tru
 extra_top = 4.5 if label_rotation == "Vertical" else 2.2
 if "start_loc" in dir() and start_loc:
     extra_top = max(extra_top, 4.0)
-
-_sl  = start_loc   if "start_loc"   in dir() else ""
-_el  = end_loc     if "end_loc"     in dir() else ""
-_ct  = chart_title if "chart_title" in dir() else ""
 
 common_kwargs = dict(
     dist_arr=dist_arr, ele_display=ele_display, df_raw=df_raw,
