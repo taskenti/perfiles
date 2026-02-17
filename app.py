@@ -535,25 +535,55 @@ def build_static_fig(
     # ══════════════════════════════════════════════════════
     # CAPA 5 — Etiquetas de localidades
     # ══════════════════════════════════════════════════════
-    rotation_deg   = 90 if label_rotation == "Vertical" else 0
-    y_offset_label = padding * (1.0 if label_rotation == "Vertical" else 0.5)
+    # Las localidades van SIEMPRE en vertical.
+    # Para que el texto no se solape con el borde del marco:
+    #   - Salida: el marcador está en x=0 pero el texto se desplaza
+    #     ligeramente hacia la derecha (hacia el interior del gráfico).
+    #   - Llegada: el marcador está en x=total_km pero el texto se desplaza
+    #     ligeramente hacia la izquierda (hacia el interior del gráfico).
+    # El offset en X se expresa como fracción del ancho total de la ruta.
+    _x_inset = total_km * 0.012   # ~1.2% del ancho → queda dentro del marco
 
-    def _label(x, y, text, ha="center"):
-        ax.text(x, y + y_offset_label, text,
-                ha=ha, va="bottom", rotation=90, fontsize=9,
-                fontweight="bold", color=text_color,
-                bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
-                          pad=3, boxstyle="round,pad=0.35"), zorder=5)
+    # Offset vertical: suficiente para que el texto no tape el marcador
+    _y_off_loc = padding * 0.9
 
     if start_loc:
-        ax.plot(0, float(ele_display[0]), marker="D", color="#16A34A",
+        ax.plot(0, float(ele_display[0]),
+                marker="D", color="#16A34A",
                 markersize=9, markeredgecolor="white", markeredgewidth=1.5, zorder=6)
-        _label(0, float(ele_display[0]), start_loc, ha="left")
+        ax.text(
+            _x_inset,                    # ligeramente a la derecha del borde
+            float(ele_display[0]) + _y_off_loc,
+            start_loc,
+            ha="left",                   # el texto crece hacia la derecha (interior)
+            va="bottom",
+            rotation=90,
+            fontsize=9, fontweight="bold", color=text_color,
+            bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
+                      pad=3, boxstyle="round,pad=0.35"),
+            zorder=5,
+        )
 
     if end_loc:
-        ax.plot(total_km, float(ele_display[-1]), marker="D", color="#0F172A",
+        ax.plot(total_km, float(ele_display[-1]),
+                marker="D", color="#0F172A",
                 markersize=9, markeredgecolor="white", markeredgewidth=1.5, zorder=6)
-        _label(total_km, float(ele_display[-1]), end_loc, ha="right")
+        ax.text(
+            total_km - _x_inset,         # ligeramente a la izquierda del borde
+            float(ele_display[-1]) + _y_off_loc,
+            end_loc,
+            ha="right",                  # el texto crece hacia la izquierda (interior)
+            va="bottom",
+            rotation=90,
+            fontsize=9, fontweight="bold", color=text_color,
+            bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
+                      pad=3, boxstyle="round,pad=0.35"),
+            zorder=5,
+        )
+
+    # Variable aún usada por waypoints intermedios
+    rotation_deg   = 90 if label_rotation == "Vertical" else 0
+    y_offset_label = padding * (1.0 if label_rotation == "Vertical" else 0.5)
 
     # ══════════════════════════════════════════════════════
     # CAPA 6 — Waypoints (respeta atributos por-waypoint del editor)
