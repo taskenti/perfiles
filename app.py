@@ -1,8 +1,9 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GPX ALTIMETRY STUDIO PRO  ·  v3.0
+#  GPX ALTIMETRY STUDIO PRO  ·  v3.1
 #  Features: HTML embed, slope gradient fill, social sizes, slope subgraph,
 #  sector table, km bands, WP shortcode, danger zones, 3D shadow, ITRA score,
-#  dual GPX compare, mini-map, auto-pass detection, GeoJSON export, batch ZIP
+#  dual GPX compare, mini-map, auto-pass + auto-villages detection,
+#  GeoJSON export, batch ZIP, save custom presets
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import streamlit as st
@@ -226,27 +227,69 @@ def compute_itra(dist_km: float, gain_m: float, loss_m: float) -> dict:
     return {"ed": round(ed, 1), "category": cat[0], "badge": cat[1], "points": points}
 
 
-# ─── FEATURE 13: Detección automática de puertos ────────────────────────────
+# ─── FEATURE 13: Detección automática de puertos Y pueblos ──────────────────
+def _smooth_for_peaks(ele: np.ndarray) -> np.ndarray:
+    """Suavizado estándar para find_peaks."""
+    w = max(5, len(ele) // 200)
+    return pd.Series(ele).rolling(window=w, center=True, min_periods=1).mean().values
+
+
 def detect_passes(dist: np.ndarray, ele: np.ndarray,
                   min_gain: float = 100, min_dist_km: float = 1.0) -> list:
     """
     Detecta máximos locales significativos (puertos/collados).
-    Retorna lista de {'km', 'ele', 'label'}.
+    Criterio: cimas con prominencia >= min_gain metros respecto al entorno.
     """
     from scipy.signal import find_peaks
-    # Suavizar para evitar ruido
-    smooth = pd.Series(ele).rolling(window=max(5, len(ele)//200), center=True, min_periods=1).mean().values
-    peaks, props = find_peaks(smooth, prominence=min_gain, distance=int(min_dist_km / (dist[-1]/len(dist))))
-    passes = []
-    for i, p in enumerate(peaks):
-        passes.append({
-            "km":    round(float(dist[p]), 2),
-            "ele":   round(float(ele[p]), 1),
-            "label": f"Puerto {i+1}",
-            "icon":  "⛰️",
+    smooth = _smooth_for_peaks(ele)
+    step_km = dist[-1] / len(dist) if len(dist) > 0 else 0.01
+    min_dist_pts = max(1, int(min_dist_km / step_km))
+    peaks, _ = find_peaks(smooth, prominence=min_gain, distance=min_dist_pts)
+    return [
+        {
+            "km":       round(float(dist[p]), 2),
+            "ele":      round(float(ele[p]), 1),
+            "label":    f"Puerto {i+1}",
+            "icon":     "⛰️",
             "icon_key": "⛰️ Puerto",
-        })
-    return passes
+        }
+        for i, p in enumerate(peaks)
+    ]
+
+
+def detect_villages(dist: np.ndarray, ele: np.ndarray,
+                    min_drop: float = 40.0, min_dist_km: float = 1.5) -> list:
+    """
+    Detecta mínimos locales significativos que corresponden a valles habitados
+    (pueblos, aldeas). Los pueblos suelen estar en el fondo de valles y quebradas.
+
+    Criterio: mínimos locales donde la elevación cae al menos min_drop metros
+    respecto al entorno cercano. Separados al menos min_dist_km entre sí.
+
+    Returns lista de {'km', 'ele', 'label', 'icon', 'icon_key'}.
+    """
+    from scipy.signal import find_peaks
+    smooth = _smooth_for_peaks(ele)
+    # Invertimos para buscar mínimos como máximos del negativo
+    inv = -smooth
+    step_km = dist[-1] / len(dist) if len(dist) > 0 else 0.01
+    min_dist_pts = max(1, int(min_dist_km / step_km))
+    valleys, props = find_peaks(inv, prominence=min_drop, distance=min_dist_pts)
+
+    # Filtrar: excluir el punto de inicio y fin (primeros/últimos 2%)
+    margin = max(1, int(len(dist) * 0.02))
+    valleys = valleys[(valleys > margin) & (valleys < len(dist) - margin)]
+
+    return [
+        {
+            "km":       round(float(dist[v]), 2),
+            "ele":      round(float(ele[v]), 1),
+            "label":    f"Pueblo {i+1}",
+            "icon":     "🏘️",
+            "icon_key": "🏘️ Pueblo",
+        }
+        for i, v in enumerate(valleys)
+    ]
 
 
 # ─── FEATURE 14: GeoJSON export ──────────────────────────────────────────────
@@ -787,7 +830,7 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
 
 with st.sidebar:
     st.markdown("## 🏔️ GPX Altimetry Studio")
-    st.caption("v3.0 · Pro Edition")
+    st.caption("v3.1 · Pro Edition")
     st.markdown("---")
 
     st.markdown("### 📁 Archivo principal")
@@ -807,16 +850,18 @@ with st.sidebar:
 
     with st.expander("Colores", expanded=True):
         c1, c2 = st.columns(2)
-        line_color  = c1.color_picker("Línea",    "#EF4444")
-        fill_color  = c2.color_picker("Relleno",  "#FCA5A5")
-        bg_color    = c1.color_picker("Fondo",    "#FFFFFF")
-        text_color  = c2.color_picker("Texto",    "#374151")
+        line_color  = c1.color_picker("Línea",    st.session_state.get("_lc", "#EF4444"), key="cp_lc")
+        fill_color  = c2.color_picker("Relleno",  st.session_state.get("_fc", "#FCA5A5"), key="cp_fc")
+        bg_color    = c1.color_picker("Fondo",    st.session_state.get("_bc", "#FFFFFF"),  key="cp_bc")
+        text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
         line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
         fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.05)
 
     with st.expander("Opciones del gráfico", expanded=True):
         smooth_curve    = st.checkbox("Suavizado",         value=True)
-        smooth_strength = st.slider("Intensidad", 3, 51, 7, 2) if smooth_curve else 3
+        # min=3, step=2 → valores válidos: 3,5,7,9… — value=7 es válido
+        smooth_strength = st.slider("Intensidad suavizado", min_value=3, max_value=51,
+                                    value=7, step=2) if smooth_curve else 3
         show_grid       = st.checkbox("Rejilla",           value=True)
         fill_area       = st.checkbox("Rellenar área",     value=True)
 
@@ -844,18 +889,59 @@ with st.sidebar:
         aspect_ratio   = st.slider("Proporción W/H", 1.0, 10.0, 4.0, 0.5)
 
     with st.expander("💾 Presets de estilo"):
-        presets = {
-            "— Sin preset —": None,
+        # Presets de fábrica
+        FACTORY_PRESETS = {
             "Montaña Clásica": dict(lc="#EF4444", fc="#FCA5A5", bc="#FFFFFF", tc="#374151"),
             "Minimalista B&N": dict(lc="#000000", fc="#CCCCCC", bc="#FFFFFF", tc="#111111"),
             "Night Mode":      dict(lc="#60A5FA", fc="#1E3A5F", bc="#0F172A", tc="#E2E8F0"),
             "Naturaleza":      dict(lc="#16A34A", fc="#BBF7D0", bc="#F0FDF4", tc="#14532D"),
             "Desierto":        dict(lc="#D97706", fc="#FDE68A", bc="#FFFBEB", tc="#92400E"),
         }
-        chosen = st.selectbox("Preset", list(presets.keys()))
-        if st.button("Aplicar preset") and presets[chosen]:
-            p = presets[chosen]
-            line_color, fill_color, bg_color, text_color = p["lc"], p["fc"], p["bc"], p["tc"]
+        # Presets del usuario (guardados en session_state)
+        if "user_presets" not in st.session_state:
+            st.session_state["user_presets"] = {}
+
+        all_presets = {"— Sin preset —": None,
+                       **FACTORY_PRESETS,
+                       **st.session_state["user_presets"]}
+
+        chosen = st.selectbox("Cargar preset", list(all_presets.keys()))
+        if st.button("▶ Aplicar preset") and all_presets.get(chosen):
+            p = all_presets[chosen]
+            # Los colores se inyectan en session_state para que los color_picker
+            # los usen como valor por defecto en el siguiente rerun
+            st.session_state["_lc"] = p["lc"]
+            st.session_state["_fc"] = p["fc"]
+            st.session_state["_bc"] = p["bc"]
+            st.session_state["_tc"] = p["tc"]
+            st.rerun()
+
+        st.markdown("---")
+        st.markdown("**💾 Guardar estilo actual como preset**")
+        new_preset_name = st.text_input("Nombre del preset", placeholder="Mi estilo rojo oscuro",
+                                         key="new_preset_name_input")
+        if st.button("💾 Guardar preset actual"):
+            name = new_preset_name.strip()
+            if not name:
+                st.warning("Escribe un nombre para el preset.")
+            elif name in FACTORY_PRESETS:
+                st.warning("Ese nombre está reservado para presets de fábrica. Elige otro.")
+            else:
+                st.session_state["user_presets"][name] = dict(
+                    lc=line_color, fc=fill_color, bc=bg_color, tc=text_color
+                )
+                st.success(f"✅ Preset «{name}» guardado. Aparecerá en la lista.")
+                st.rerun()
+
+        # Borrar preset de usuario
+        user_preset_names = list(st.session_state["user_presets"].keys())
+        if user_preset_names:
+            del_name = st.selectbox("Borrar preset de usuario", ["— No borrar —"] + user_preset_names,
+                                     key="del_preset_sel")
+            if st.button("🗑 Borrar preset") and del_name != "— No borrar —":
+                del st.session_state["user_presets"][del_name]
+                st.success(f"Preset «{del_name}» eliminado.")
+                st.rerun()
 
     with st.expander("🌐 Opciones embed WordPress"):
         embed_width  = st.number_input("Ancho embed (px)", 400, 2000, 900, 50)
@@ -963,7 +1049,7 @@ if "waypoints" not in st.session_state:
 
 st.markdown('<div class="sec">📍 Puntos de Interés</div>', unsafe_allow_html=True)
 
-qa1, qa2, qa3, qa4, qa5 = st.columns(5)
+qa1, qa2, qa3, qa4, qa5, qa6 = st.columns(6)
 if qa1.button("🏆 Auto-Cima", use_container_width=True):
     peak_idx = int(np.argmax(ele_display))
     if not any("Cima" in w["label"] for w in st.session_state["waypoints"]):
@@ -994,13 +1080,42 @@ if qa3.button("⛰️ Auto-Puertos", use_container_width=True):
     else:
         st.info("No se detectaron puertos significativos.")
 
-if qa4.button("🔀 Ordenar km", use_container_width=True):
+if qa4.button("🏘️ Auto-Pueblos", use_container_width=True):
+    villages = detect_villages(dist_arr, ele_display,
+                               min_drop=st.session_state.get("village_min_drop", 40.0),
+                               min_dist_km=st.session_state.get("village_min_dist", 1.5))
+    added = 0
+    for v in villages:
+        if not any(abs(w["km"]-v["km"]) < 0.5 for w in st.session_state["waypoints"]):
+            st.session_state["waypoints"].append(v)
+            added += 1
+    if added:
+        st.success(f"✅ {added} pueblo(s)/valle(s) detectados y añadidos")
+        st.rerun()
+    else:
+        st.info("No se detectaron valles habitados significativos.")
+
+if qa5.button("🔀 Ordenar km", use_container_width=True):
     st.session_state["waypoints"].sort(key=lambda x: x["km"])
     st.rerun()
 
-if qa5.button("🗑️ Limpiar todos", use_container_width=True):
+if qa6.button("🗑️ Limpiar todos", use_container_width=True):
     st.session_state["waypoints"] = []
     st.rerun()
+
+# Parámetros de detección de pueblos (colapsados)
+with st.expander("⚙️ Config detección automática", expanded=False):
+    c_pa1, c_pa2, c_pa3, c_pa4 = st.columns(4)
+    st.session_state["village_min_drop"] = c_pa1.number_input(
+        "Pueblos: caída mín. (m)", 10, 300, 40, 10,
+        help="Metros de descenso desde el entorno para considerar un valle como pueblo")
+    st.session_state["village_min_dist"] = c_pa2.number_input(
+        "Pueblos: dist. mín. (km)", 0.5, 10.0, 1.5, 0.5,
+        help="Separación mínima entre pueblos detectados")
+    c_pa3.number_input("Puertos: ganancia mín. (m)", 50, 500, 100, 25, key="pass_min_gain",
+        help="Prominencia mínima para considerar un máximo como puerto")
+    c_pa4.number_input("Puertos: dist. mín. (km)", 0.5, 10.0, 1.0, 0.5, key="pass_min_dist",
+        help="Separación mínima entre puertos detectados")
 
 # ── Selector + mapa ──
 map_km_sel = st.slider("📍 Posición en ruta (km)", 0.0, float(total_km),
@@ -1086,6 +1201,170 @@ st.divider()
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown('<div class="sec">👁️ Vista Previa Interactiva</div>', unsafe_allow_html=True)
 
+# ─────────────────────────────────────────────────────────────────────────────
+# VISTA PREVIA INTERACTIVA  (Plotly nativo — márgenes correctos)
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="sec">👁️ Vista Previa Interactiva</div>', unsafe_allow_html=True)
+
+_sl_v  = start_loc   if "start_loc"   in dir() else ""
+_el_v  = end_loc     if "end_loc"     in dir() else ""
+_ct_v  = chart_title if "chart_title" in dir() else ""
+
+# Construimos la figura Plotly directamente (no via HTML) para que Streamlit
+# la renderice sin el iframe que trunca los márgenes.
+_pad_v = (max_ele - min_ele) * 0.15
+
+if show_slope_subgraph:
+    fig_prev = psubplots.make_subplots(
+        rows=2, cols=1,
+        row_heights=[0.78, 0.22],
+        shared_xaxes=True,
+        vertical_spacing=0.05,
+    )
+    def _padd(tr): fig_prev.add_trace(tr, row=1, col=1)
+else:
+    fig_prev = go.Figure()
+    def _padd(tr): fig_prev.add_trace(tr)
+
+# ── Relleno/línea ──
+if show_slope_heat and slope_fill_style == "Relleno por pendiente (Komoot)":
+    _slopes_v = slopes_array(dist_arr, ele_display)
+    for _i in range(len(dist_arr) - 1):
+        _col = slope_color(_slopes_v[_i])
+        _xs  = [dist_arr[_i], dist_arr[_i+1], dist_arr[_i+1], dist_arr[_i], dist_arr[_i]]
+        _ys  = [ele_display[_i], ele_display[_i+1],
+                min_ele - _pad_v, min_ele - _pad_v, ele_display[_i]]
+        _padd(go.Scatter(x=_xs, y=_ys, fill="toself",
+                         fillcolor=hex_to_rgba(_col, fill_alpha),
+                         line=dict(width=0), mode="lines",
+                         showlegend=False, hoverinfo="skip"))
+    _padd(go.Scatter(x=dist_arr.tolist(), y=ele_display.tolist(),
+                     mode="lines", line=dict(color=line_color, width=line_width),
+                     showlegend=False,
+                     hovertemplate="km %{x:.2f}<br>%{y:.0f} m<extra></extra>"))
+elif show_slope_heat and slope_fill_style == "Línea coloreada por pendiente":
+    _slopes_v = slopes_array(dist_arr, ele_display)
+    for _i in range(len(dist_arr) - 1):
+        _padd(go.Scatter(
+            x=[dist_arr[_i], dist_arr[_i+1]],
+            y=[ele_display[_i], ele_display[_i+1]],
+            mode="lines", line=dict(color=slope_color(_slopes_v[_i]), width=line_width),
+            showlegend=False, hoverinfo="skip"))
+else:
+    _padd(go.Scatter(
+        x=dist_arr.tolist(), y=ele_display.tolist(), mode="lines",
+        line=dict(color=line_color, width=line_width),
+        fill="tozeroy" if fill_area else "none",
+        fillcolor=hex_to_rgba(fill_color, fill_alpha) if fill_area else None,
+        hovertemplate="km %{x:.2f}<br>%{y:.0f} m<extra></extra>",
+        showlegend=False,
+    ))
+
+# ── Zonas de peligro ──
+if show_danger_zones:
+    for _zs, _ze in detect_danger_zones(dist_arr, ele_display, threshold=danger_threshold):
+        if show_slope_subgraph:
+            fig_prev.add_vrect(x0=_zs, x1=_ze, fillcolor="rgba(220,38,38,0.12)",
+                               layer="below", line_width=0, row=1, col=1)
+        else:
+            fig_prev.add_vrect(x0=_zs, x1=_ze, fillcolor="rgba(220,38,38,0.12)",
+                               layer="below", line_width=0)
+
+# ── Waypoints ──
+for _wp in st.session_state["waypoints"]:
+    _st = WAYPOINT_DEFS.get(_wp["icon_key"], WAYPOINT_DEFS["📍 Genérico"])
+    _wlab = "<br>".join(textwrap.wrap(_wp["label"], 15))
+    _padd(go.Scatter(
+        x=[_wp["km"]], y=[_wp["ele"]],
+        mode="markers+text",
+        text=[f'{_st["emoji"]} {_wlab}'],
+        textposition="top center",
+        marker=dict(color=_st["color"], size=10, symbol="circle",
+                    line=dict(color=_st["edge"], width=2)),
+        showlegend=False,
+        hovertemplate=f"<b>{_wp['label']}</b><br>{_wp['km']:.1f} km · {_wp['ele']:.0f} m<extra></extra>",
+    ))
+
+# ── Start / End ──
+for _xp, _nm, _nc in [(0.0, _sl_v, "#16A34A"), (total_km, _el_v, "#0F172A")]:
+    if not _nm:
+        continue
+    _idx = int(np.argmin(np.abs(dist_arr - _xp)))
+    _padd(go.Scatter(
+        x=[float(dist_arr[_idx])], y=[float(ele_display[_idx])],
+        mode="markers+text", text=[_nm], textposition="top center",
+        marker=dict(color=_nc, size=12, symbol="diamond",
+                    line=dict(color="white", width=2)),
+        showlegend=False,
+        hovertemplate=f"<b>{_nm}</b><br>{ele_display[_idx]:.0f} m<extra></extra>",
+    ))
+
+# ── Marcadores km ──
+if show_km_markers:
+    for _km in np.arange(km_interval, total_km, km_interval):
+        fig_prev.add_vline(x=float(_km),
+                           line=dict(color="#94a3b8", width=1, dash="dot"))
+
+# ── Subgráfico pendiente ──
+if show_slope_subgraph:
+    _slps = slopes_array(dist_arr, ele_display)
+    _smid = (dist_arr[:-1] + dist_arr[1:]) / 2
+    fig_prev.add_trace(go.Bar(
+        x=_smid.tolist(), y=_slps.tolist(),
+        marker_color=[slope_color(s) for s in _slps],
+        showlegend=False,
+        hovertemplate="km %{x:.2f}<br>%{y:.1f}%<extra></extra>",
+    ), row=2, col=1)
+
+# ── Layout — márgenes generosos para que no se recorte nada ──
+_grid_col = "#e2e8f0" if show_grid else "rgba(0,0,0,0)"
+_yrange   = [min_ele - _pad_v * 1.2, max_ele + _pad_v * 2.5]
+_prev_h   = max(350, int(750 / max(aspect_ratio, 1.0)))
+if show_slope_subgraph:
+    _prev_h += 140
+
+_layout_prev = dict(
+    height=_prev_h,
+    paper_bgcolor=bg_color,
+    plot_bgcolor=bg_color,
+    # Márgenes con espacio real para etiquetas de waypoints arriba y ejes abajo
+    margin=dict(l=60, r=30, t=60 if _ct_v else 30, b=60),
+    hovermode="x unified",
+    title=dict(text=_ct_v, font=dict(size=14, color=text_color), x=0.5) if _ct_v else {},
+)
+
+if show_slope_subgraph:
+    fig_prev.update_layout(**_layout_prev)
+    fig_prev.update_xaxes(showgrid=show_grid, gridcolor=_grid_col, zeroline=False,
+                          row=2, col=1,
+                          title_text="Distancia (km)",
+                          title_font=dict(color=text_color),
+                          tickfont=dict(color=text_color))
+    fig_prev.update_yaxes(showgrid=show_grid, gridcolor=_grid_col, zeroline=False,
+                          row=1, col=1,
+                          title_text="Altitud (m)",
+                          title_font=dict(color=text_color),
+                          tickfont=dict(color=text_color),
+                          range=_yrange)
+    fig_prev.update_yaxes(title_text="Pend. %", row=2, col=1,
+                          title_font=dict(color=text_color, size=9),
+                          tickfont=dict(color=text_color))
+    fig_prev.update_xaxes(showgrid=show_grid, gridcolor=_grid_col, zeroline=False,
+                          row=1, col=1, tickfont=dict(color=text_color))
+else:
+    fig_prev.update_layout(
+        **_layout_prev,
+        xaxis=dict(title="Distancia (km)", showgrid=show_grid, gridcolor=_grid_col,
+                   zeroline=False, range=[0, total_km * 1.02],
+                   title_font=dict(color=text_color), tickfont=dict(color=text_color)),
+        yaxis=dict(title="Altitud (m)", showgrid=show_grid, gridcolor=_grid_col,
+                   zeroline=False, range=_yrange,
+                   title_font=dict(color=text_color), tickfont=dict(color=text_color)),
+    )
+
+st.plotly_chart(fig_prev, use_container_width=True)
+
+# HTML embed se sigue generando para descarga (sin renderizarlo en pantalla)
 html_embed_str = build_html_embed(
     dist_arr, ele_display, df_raw, total_km,
     min_ele, max_ele, gain, loss, max_slope,
@@ -1094,16 +1373,10 @@ html_embed_str = build_html_embed(
     show_slope_heat, slope_fill_style,
     show_grid, show_km_markers, km_interval,
     st.session_state["waypoints"],
-    start_loc if "start_loc" in dir() else "",
-    end_loc   if "end_loc"   in dir() else "",
-    chart_title if "chart_title" in dir() else "",
+    _sl_v, _el_v, _ct_v,
     show_danger_zones, danger_threshold,
     show_slope_subgraph, embed_width, embed_height,
 )
-
-# Mostrar en Streamlit como componente HTML
-preview_height = max(300, int(800 / aspect_ratio))
-st.components.v1.html(html_embed_str, height=preview_height + (120 if show_slope_subgraph else 0))
 
 # ── Comparación de rutas (FEATURE 11) ──
 if df_raw2 is not None:
@@ -1308,4 +1581,4 @@ with tab_batch:
         st.success(f"✅ {len(batch_files)} perfiles generados")
 
 st.divider()
-st.caption("GPX Altimetry Studio Pro v3.0 · Python + Streamlit + Matplotlib + Plotly")
+st.caption("GPX Altimetry Studio Pro v3.1 · Python + Streamlit + Matplotlib + Plotly")
