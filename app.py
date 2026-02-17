@@ -84,15 +84,23 @@ WAYPOINT_DEFS = {
     "🏥 Primeros Aux.":   {"emoji":"🏥","marker":"+", "color":"#F43F5E","edge":"#9F1239","size":14},
 }
 
-# Paleta de pendiente estándar industria (% → color hex)
+# Paleta de pendiente: 4 categorías limpias, colores 2026
 SLOPE_PALETTE = [
-    (-99, -12, "#1D4ED8"),   # bajada pronunciada
-    (-12,  -6, "#60A5FA"),   # bajada suave
-    ( -6,   3, "#22C55E"),   # llano / suave
-    (  3,   8, "#FBBF24"),   # moderado
-    (  8,  12, "#F97316"),   # empinado
-    ( 12,  99, "#DC2626"),   # muy empinado / peligroso
+    (-99,  3, "#22C55E"),   # llano / bajadas → verde
+    (  3,  8, "#F59E0B"),   # moderado → ámbar
+    (  8, 18, "#EF4444"),   # empinado → rojo
+    ( 18, 99, "#7C3AED"),   # extremo  → violeta oscuro
 ]
+
+# Ventana de suavizado para el heatmap de pendiente (evita "arcoíris")
+_SLOPE_SMOOTH_W = 15   # puntos a promediar antes de clasificar color
+
+def _smoothed_slopes(dist: np.ndarray, ele: np.ndarray) -> np.ndarray:
+    """Pendiente suavizada por ventana móvil para coloreado limpio."""
+    raw = slopes_array(dist, ele)
+    w   = min(_SLOPE_SMOOTH_W, max(3, len(raw) // 50))
+    return pd.Series(raw).rolling(window=w, center=True, min_periods=1).mean().to_numpy()
+
 
 SOCIAL_SIZES = {
     "Web / og:image (1200×630)": (1200, 630),
@@ -475,11 +483,11 @@ def build_static_fig(
     # CAPA 2 — línea del perfil (slope coloreada o sólida)
     # ══════════════════════════════════════════════════════
     if show_slope_heat and slope_fill_style == "Línea coloreada por pendiente":
-        seg_cols = compute_slope_colors_arr(dist_arr, ele_display)
+        seg_cols = [slope_color(s) for s in _smoothed_slopes(dist_arr, ele_display)]
         for i in range(len(dist_arr) - 1):
             ax.plot([dist_arr[i], dist_arr[i+1]],
                     [ele_display[i], ele_display[i+1]],
-                    color=seg_cols[i], linewidth=line_width,
+                    color=seg_cols[i], linewidth=line_width,  # usa el grosor configurado
                     solid_capstyle="round", zorder=3)
     else:
         # ── FEATURE 9: Sombra 3D bajo la línea ──
@@ -533,46 +541,33 @@ def build_static_fig(
                     fontsize=6.5, color=text_color, alpha=0.55)
 
     # ══════════════════════════════════════════════════════
-    # CAPA 5 — Etiquetas de localidades (SIEMPRE VERTICAL, sin icono)
+    # CAPA 5 — Etiquetas de localidades (vertical, negro, fondo transparente)
     # ══════════════════════════════════════════════════════
-    # Offset horizontal: mueve el texto DENTRO del marco para que no se corte
-    _x_inset   = total_km * 0.015   # 1.5% del ancho total
+    # Offset mínimo (~0.3%): solo para no pisar el eje Y, pegado a su posición real
+    _x_inset   = total_km * 0.003
     _y_off_loc = padding * 0.8
 
     if start_loc:
-        # Línea vertical fina desde la base hasta el marcador
-        ax.axvline(x=0, color="#16A34A", linewidth=1.2, alpha=0.4,
-                   linestyle="--", zorder=3)
         ax.text(
             _x_inset,
             float(ele_display[0]) + _y_off_loc,
             start_loc,
-            ha="left",       # crece hacia la derecha → dentro del gráfico
-            va="bottom",
-            rotation=90,     # SIEMPRE VERTICAL
-            fontsize=9,
-            fontweight="bold",
-            color=text_color,
-            bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
-                      pad=3, boxstyle="round,pad=0.35"),
+            ha="left", va="bottom",
+            rotation=90,
+            fontsize=9, fontweight="bold", color="#000000",
+            bbox=dict(facecolor="none", edgecolor="none", pad=2),
             zorder=5,
         )
 
     if end_loc:
-        ax.axvline(x=total_km, color="#0F172A", linewidth=1.2, alpha=0.4,
-                   linestyle="--", zorder=3)
         ax.text(
             total_km - _x_inset,
             float(ele_display[-1]) + _y_off_loc,
             end_loc,
-            ha="right",      # crece hacia la izquierda → dentro del gráfico
-            va="bottom",
-            rotation=90,     # SIEMPRE VERTICAL
-            fontsize=9,
-            fontweight="bold",
-            color=text_color,
-            bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
-                      pad=3, boxstyle="round,pad=0.35"),
+            ha="right", va="bottom",
+            rotation=90,
+            fontsize=9, fontweight="bold", color="#000000",
+            bbox=dict(facecolor="none", edgecolor="none", pad=2),
             zorder=5,
         )
 
@@ -624,25 +619,25 @@ def build_static_fig(
     stats_txt = (f"↑ {gain:.0f}m  ↓ {loss:.0f}m  "
                  f"⬆ {max_ele:.0f}m  ⬇ {min_ele:.0f}m  "
                  f"≈ {total_km:.1f}km  max {max_slope:.1f}%")
-    ax.text(0.01, 0.02, stats_txt, transform=ax.transAxes,
+    # Posición: dentro del área del gráfico, esquina inferior derecha,
+    # por ENCIMA del eje X para no solapar etiquetas de km
+    ax.text(0.99, 0.04, stats_txt, transform=ax.transAxes,
             fontsize=6.5, color=text_color, alpha=0.65,
-            va="bottom", fontfamily="monospace")
+            va="bottom", ha="right", fontfamily="monospace")
 
     if chart_title:
         ax.set_title(chart_title, fontsize=13, fontweight="bold",
                      color=text_color, pad=6)
 
-    # ── Leyenda pendiente ──
+    # ── Leyenda pendiente (4 categorías) ──
     if show_slope_heat and show_slope_legend:
         legend_patches = [
-            mpatches.Patch(color="#1D4ED8", label="Bajada pronunciada"),
-            mpatches.Patch(color="#60A5FA", label="Bajada suave"),
-            mpatches.Patch(color="#22C55E", label="Llano / suave (<3%)"),
-            mpatches.Patch(color="#FBBF24", label="Moderado (3–8%)"),
-            mpatches.Patch(color="#F97316", label="Empinado (8–12%)"),
-            mpatches.Patch(color="#DC2626", label="Muy empinado (>12%)"),
+            mpatches.Patch(color="#22C55E", label="Llano / bajada (<3%)"),
+            mpatches.Patch(color="#F59E0B", label="Moderado (3–8%)"),
+            mpatches.Patch(color="#EF4444", label="Empinado (8–18%)"),
+            mpatches.Patch(color="#7C3AED", label="Extremo (>18%)"),
         ]
-        ax.legend(handles=legend_patches, loc="upper right", fontsize=6.5,
+        ax.legend(handles=legend_patches, loc="upper right", fontsize=7,
                   framealpha=0.85, edgecolor="#e2e8f0", ncol=2)
 
     # ══════════════════════════════════════════════════════
@@ -895,16 +890,9 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.markdown("## 🏔️ GPX Altimetry Studio")
-    st.caption("v3.2 · Pro Edition")
-    st.markdown("---")
-
-    st.markdown("### 📁 Archivo principal")
+    # ── Carga del archivo — primera prioridad ──
+    st.markdown("### 📁 Archivo GPX")
     uploaded_file = st.file_uploader("GPX principal", type=["gpx"], label_visibility="collapsed")
-
-    st.markdown("### 🔀 Comparar rutas (opcional)")
-    uploaded_file2 = st.file_uploader("GPX secundario", type=["gpx"], label_visibility="collapsed",
-                                       help="Superpone un segundo perfil para comparar")
 
     if uploaded_file:
         st.markdown("### 📍 Localidades")
@@ -914,18 +902,9 @@ with st.sidebar:
 
     st.markdown("### 🎨 Diseño")
 
-    with st.expander("Colores", expanded=True):
-        c1, c2 = st.columns(2)
-        line_color  = c1.color_picker("Línea",    st.session_state.get("_lc", "#EF4444"), key="cp_lc")
-        fill_color  = c2.color_picker("Relleno",  st.session_state.get("_fc", "#FCA5A5"), key="cp_fc")
-        bg_color    = c1.color_picker("Fondo",    st.session_state.get("_bc", "#FFFFFF"),  key="cp_bc")
-        text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
-        line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
-        fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.01)
-
-    with st.expander("Opciones del gráfico", expanded=True):
+    # ── Opciones del gráfico PRIMERO (más usadas) ──
+    with st.expander("📊 Opciones del gráfico", expanded=True):
         smooth_curve    = st.checkbox("Suavizado",         value=True)
-        # min=3, step=2 → valores válidos: 3,5,7,9… — value=7 es válido
         smooth_strength = st.slider("Intensidad suavizado", min_value=3, max_value=51,
                                     value=7, step=2) if smooth_curve else 3
         show_grid       = st.checkbox("Rejilla",           value=True)
@@ -954,28 +933,33 @@ with st.sidebar:
         label_rotation = st.radio("Etiquetas waypoints", ["Horizontal","Vertical"], index=1, horizontal=True)
         aspect_ratio   = st.slider("Proporción W/H", 1.0, 10.0, 4.0, 0.5)
 
-    with st.expander("💾 Presets de estilo"):
-        # Presets de fábrica
+    # ── Colores ──
+    with st.expander("🎨 Colores", expanded=False):
+        c1, c2 = st.columns(2)
+        line_color  = c1.color_picker("Línea",    st.session_state.get("_lc", "#EF4444"), key="cp_lc")
+        fill_color  = c2.color_picker("Relleno",  st.session_state.get("_fc", "#FCA5A5"), key="cp_fc")
+        bg_color    = c1.color_picker("Fondo",    st.session_state.get("_bc", "#FFFFFF"),  key="cp_bc")
+        text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
+        line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
+        fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.01)
+
+    # ── Presets de estilo ──
+    with st.expander("💾 Presets de estilo", expanded=False):
         FACTORY_PRESETS = {
-            "Montaña Clásica": dict(lc="#EF4444", fc="#FCA5A5", bc="#FFFFFF", tc="#374151"),
-            "Minimalista B&N": dict(lc="#000000", fc="#CCCCCC", bc="#FFFFFF", tc="#111111"),
-            "Night Mode":      dict(lc="#60A5FA", fc="#1E3A5F", bc="#0F172A", tc="#E2E8F0"),
-            "Naturaleza":      dict(lc="#16A34A", fc="#BBF7D0", bc="#F0FDF4", tc="#14532D"),
-            "Desierto":        dict(lc="#D97706", fc="#FDE68A", bc="#FFFBEB", tc="#92400E"),
+            "Coral Moderno":   dict(lc="#F43F5E", fc="#FECDD3", bc="#FFF1F2", tc="#1C1C1E"),
+            "Océano Profundo": dict(lc="#0EA5E9", fc="#BAE6FD", bc="#0F172A", tc="#E0F2FE"),
+            "Bosque Oscuro":   dict(lc="#4ADE80", fc="#166534", bc="#052E16", tc="#DCFCE7"),
+            "Arena Desierto":  dict(lc="#D97706", fc="#FDE68A", bc="#1C1917", tc="#FEF3C7"),
+            "Neón Urbano":     dict(lc="#A855F7", fc="#3B0764", bc="#09090B", tc="#E9D5FF"),
+            "Nieve Alpina":    dict(lc="#64748B", fc="#CBD5E1", bc="#F8FAFC", tc="#0F172A"),
         }
-        # Presets del usuario (guardados en session_state)
         if "user_presets" not in st.session_state:
             st.session_state["user_presets"] = {}
 
-        all_presets = {"— Sin preset —": None,
-                       **FACTORY_PRESETS,
-                       **st.session_state["user_presets"]}
-
+        all_presets = {"— Sin preset —": None, **FACTORY_PRESETS, **st.session_state["user_presets"]}
         chosen = st.selectbox("Cargar preset", list(all_presets.keys()))
         if st.button("▶ Aplicar preset") and all_presets.get(chosen):
             p = all_presets[chosen]
-            # Los colores se inyectan en session_state para que los color_picker
-            # los usen como valor por defecto en el siguiente rerun
             st.session_state["_lc"] = p["lc"]
             st.session_state["_fc"] = p["fc"]
             st.session_state["_bc"] = p["bc"]
@@ -983,39 +967,35 @@ with st.sidebar:
             st.rerun()
 
         st.markdown("---")
-        st.markdown("**💾 Guardar estilo actual como preset**")
-        new_preset_name = st.text_input("Nombre del preset", placeholder="Mi estilo rojo oscuro",
+        new_preset_name = st.text_input("Nombre del nuevo preset", placeholder="Mi estilo",
                                          key="new_preset_name_input")
-        if st.button("💾 Guardar preset actual"):
+        if st.button("💾 Guardar estilo actual"):
             name = new_preset_name.strip()
             if not name:
-                st.warning("Escribe un nombre para el preset.")
+                st.warning("Escribe un nombre.")
             elif name in FACTORY_PRESETS:
-                st.warning("Ese nombre está reservado para presets de fábrica. Elige otro.")
+                st.warning("Nombre reservado, elige otro.")
             else:
                 st.session_state["user_presets"][name] = dict(
-                    lc=line_color, fc=fill_color, bc=bg_color, tc=text_color
-                )
-                st.success(f"✅ Preset «{name}» guardado. Aparecerá en la lista.")
+                    lc=line_color, fc=fill_color, bc=bg_color, tc=text_color)
+                st.success(f"✅ «{name}» guardado")
                 st.rerun()
 
-        # Borrar preset de usuario
         user_preset_names = list(st.session_state["user_presets"].keys())
         if user_preset_names:
-            del_name = st.selectbox("Borrar preset de usuario", ["— No borrar —"] + user_preset_names,
+            del_name = st.selectbox("Borrar preset", ["— No borrar —"] + user_preset_names,
                                      key="del_preset_sel")
-            if st.button("🗑 Borrar preset") and del_name != "— No borrar —":
+            if st.button("🗑 Borrar") and del_name != "— No borrar —":
                 del st.session_state["user_presets"][del_name]
-                st.success(f"Preset «{del_name}» eliminado.")
                 st.rerun()
 
-    with st.expander("🌐 Opciones embed WordPress"):
+    with st.expander("🌐 Embed WordPress", expanded=False):
         embed_width  = st.number_input("Ancho embed (px)", 400, 2000, 900, 50)
         embed_height = st.number_input("Alto embed (px)",  200,  800, 420, 20)
-        wp_iframe_base_url = st.text_input("URL base (donde subirás el HTML)",
+        wp_iframe_base_url = st.text_input("URL base",
                                            placeholder="https://tudominio.com/wp-content/uploads/")
 
-    with st.expander("📐 Tamaños sociales"):
+    with st.expander("📐 Tamaños sociales", expanded=False):
         social_preset = st.selectbox("Formato", list(SOCIAL_SIZES.keys()))
         if SOCIAL_SIZES[social_preset] is None:
             cw1, cw2 = st.columns(2)
@@ -1024,13 +1004,21 @@ with st.sidebar:
         else:
             custom_w, custom_h = SOCIAL_SIZES[social_preset]
 
+    # ── Comparar rutas — discreta, al fondo ──
+    with st.expander("🔀 Comparar con otra ruta", expanded=False):
+        uploaded_file2 = st.file_uploader("GPX secundario", type=["gpx"],
+                                          label_visibility="collapsed")
+
+    # ── Branding — al final, discreto ──
+    st.markdown("---")
+    st.caption("🏔️ GPX Altimetry Studio Pro · v3.3")
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 st.title("🏔️ GPX Altimetry Studio Pro")
-st.markdown("Generador profesional de perfiles altimétricos para web, redes sociales y WordPress")
 
 if uploaded_file is None:
     st.info("👆 Carga un archivo GPX en el menú lateral para empezar.")
@@ -1088,35 +1076,56 @@ if gpx_native_wpts and not st.session_state.get("gpx_wpts_imported"):
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MÉTRICAS + ITRA
+# MÉTRICAS + ITRA  — 2 filas de 4
 # ─────────────────────────────────────────────────────────────────────────────
 itra = compute_itra(total_km, gain, loss)
 
-mcols = st.columns(7)
-mcols[0].metric("📏 Distancia",   f"{total_km:.2f} km")
-mcols[1].metric("⬆️ Desnivel +",  f"{gain:.0f} m")
-mcols[2].metric("⬇️ Desnivel −",  f"{loss:.0f} m")
-mcols[3].metric("🔝 Alt. Máx",    f"{max_ele:.0f} m")
-mcols[4].metric("🔽 Alt. Mín",    f"{min_ele:.0f} m")
-mcols[5].metric("📐 Pend. Máx",   f"{max_slope:.1f} %")
-mcols[6].metric("🏅 ITRA ED",     f"{itra['ed']} ({itra['category']})")
+row1 = st.columns(4)
+row1[0].metric("📏 Distancia",  f"{total_km:.2f} km")
+row1[1].metric("⬆️ Desnivel +", f"{gain:.0f} m")
+row1[2].metric("⬇️ Desnivel −", f"{loss:.0f} m")
+row1[3].metric("📐 Pend. Máx",  f"{max_slope:.1f} %")
 
-st.markdown(
-    f'ITRA: <span class="{itra["badge"]}">{itra["category"]} · {itra["points"]} puntos · ED {itra["ed"]}</span>',
+row2 = st.columns(4)
+row2[0].metric("🔝 Alt. Máx",   f"{max_ele:.0f} m")
+row2[1].metric("🔽 Alt. Mín",   f"{min_ele:.0f} m")
+
+# ITRA con info expandida al pasar cursor
+_itra_help = (
+    f"Effort Distance ITRA: {itra['ed']} · Categoría: {itra['category']} · "
+    f"≈{itra['points']} puntos\n\n"
+    "La ED (Effort Distance) es la fórmula oficial ITRA para calcular el esfuerzo de una carrera de montaña:\n"
+    "ED = distancia_km + desnivel+/100 + desnivel−/200\n\n"
+    "Categorías: XS<25 · S<45 · M<75 · L<115 · XL<160 · XXL≥160"
+)
+row2[2].metric("🏅 ITRA ED",
+               f"{itra['ed']} · {itra['category']}",
+               help=_itra_help)
+row2[3].markdown(
+    f'<span class="{itra["badge"]}" title="{_itra_help}">'
+    f'{itra["category"]} · {itra["points"]} pts</span>',
     unsafe_allow_html=True,
 )
 st.divider()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# WAYPOINTS
+# WAYPOINTS — inicializar session state
 # ─────────────────────────────────────────────────────────────────────────────
 if "waypoints" not in st.session_state:
     st.session_state["waypoints"] = []
 
-st.markdown('<div class="sec">📍 Puntos de Interés</div>', unsafe_allow_html=True)
+_sl_v  = start_loc   if "start_loc"   in dir() else ""
+_el_v  = end_loc     if "end_loc"     in dir() else ""
+_ct_v  = chart_title if "chart_title" in dir() else ""
 
-qa1, qa2, qa3, qa4, qa5, qa6 = st.columns(6)
-if qa1.button("🏆 Auto-Cima", use_container_width=True):
+# ─────────────────────────────────────────────────────────────────────────────
+# VISTA PREVIA INTERACTIVA  — PRIMERO, sin scroll
+# ─────────────────────────────────────────────────────────────────────────────
+st.markdown('<div class="sec">👁️ Vista Previa Interactiva</div>', unsafe_allow_html=True)
+
+# Botones auto-waypoints encima del perfil (compactos en una fila)
+_qa1, _qa2, _qa3, _qa4, _qa5, _qa6 = st.columns(6)
+if _qa1.button("🏆 Cima", use_container_width=True):
     peak_idx = int(np.argmax(ele_display))
     if not any("Cima" in w["label"] for w in st.session_state["waypoints"]):
         st.session_state["waypoints"].append({
@@ -1125,7 +1134,7 @@ if qa1.button("🏆 Auto-Cima", use_container_width=True):
         })
         st.rerun()
 
-if qa2.button("📉 Auto-Valle", use_container_width=True):
+if _qa2.button("📉 Valle", use_container_width=True):
     vi = int(np.argmin(ele_display))
     st.session_state["waypoints"].append({
         "km": float(dist_arr[vi]), "label": "Valle",
@@ -1133,278 +1142,44 @@ if qa2.button("📉 Auto-Valle", use_container_width=True):
     })
     st.rerun()
 
-if qa3.button("⛰️ Auto-Puertos", use_container_width=True):
+if _qa3.button("⛰️ Puertos", use_container_width=True):
     passes = detect_passes(dist_arr, ele_display)
-    added  = 0
-    for p in passes:
-        if not any(abs(w["km"]-p["km"]) < 0.5 for w in st.session_state["waypoints"]):
-            st.session_state["waypoints"].append(p)
-            added += 1
-    if added:
-        st.success(f"✅ {added} puerto(s) detectados y añadidos")
-        st.rerun()
-    else:
-        st.info("No se detectaron puertos significativos.")
+    added = sum(1 for p in passes
+                if not any(abs(w["km"]-p["km"]) < 0.5 for w in st.session_state["waypoints"])
+                and not st.session_state["waypoints"].append(p))
+    if added: st.rerun()
+    else: st.toast("No se detectaron puertos significativos")
 
-if qa4.button("🏘️ Auto-Pueblos", use_container_width=True):
+if _qa4.button("🏘️ Pueblos", use_container_width=True):
     villages = detect_villages(dist_arr, ele_display,
                                min_drop=st.session_state.get("village_min_drop", 40.0),
                                min_dist_km=st.session_state.get("village_min_dist", 1.5))
-    added = 0
-    for v in villages:
-        if not any(abs(w["km"]-v["km"]) < 0.5 for w in st.session_state["waypoints"]):
-            st.session_state["waypoints"].append(v)
-            added += 1
-    if added:
-        st.success(f"✅ {added} pueblo(s)/valle(s) detectados y añadidos")
-        st.rerun()
-    else:
-        st.info("No se detectaron valles habitados significativos.")
+    added = sum(1 for v in villages
+                if not any(abs(w["km"]-v["km"]) < 0.5 for w in st.session_state["waypoints"])
+                and not st.session_state["waypoints"].append(v))
+    if added: st.rerun()
+    else: st.toast("No se detectaron valles habitados")
 
-if qa5.button("🔀 Ordenar km", use_container_width=True):
+if _qa5.button("🔀 Ordenar", use_container_width=True):
     st.session_state["waypoints"].sort(key=lambda x: x["km"])
     st.rerun()
 
-if qa6.button("🗑️ Limpiar todos", use_container_width=True):
+if _qa6.button("🗑️ Limpiar", use_container_width=True):
     st.session_state["waypoints"] = []
     st.rerun()
 
-# Parámetros de detección de pueblos (colapsados)
-with st.expander("⚙️ Config detección automática", expanded=False):
-    c_pa1, c_pa2, c_pa3, c_pa4 = st.columns(4)
-    st.session_state["village_min_drop"] = c_pa1.number_input(
-        "Pueblos: caída mín. (m)", 10, 300, 40, 10,
-        help="Metros de descenso desde el entorno para considerar un valle como pueblo")
-    st.session_state["village_min_dist"] = c_pa2.number_input(
-        "Pueblos: dist. mín. (km)", 0.5, 10.0, 1.5, 0.5,
-        help="Separación mínima entre pueblos detectados")
-    c_pa3.number_input("Puertos: ganancia mín. (m)", 50, 500, 100, 25, key="pass_min_gain",
-        help="Prominencia mínima para considerar un máximo como puerto")
-    c_pa4.number_input("Puertos: dist. mín. (km)", 0.5, 10.0, 1.0, 0.5, key="pass_min_dist",
-        help="Separación mínima entre puertos detectados")
+# ── Figura Plotly directa ──
+_pad_v = (max_ele - min_ele) * 0.15
 
-# ── Selector + mapa ──
-# Snap del valor inicial al múltiplo de 0.1 más cercano para evitar el warning
-# "values property is in conflict with step/min/max" de Streamlit
-_map_max  = round(float(total_km), 1)
-_map_init = round(round(float(total_km / 2) / 0.1) * 0.1, 1)
-_map_init = min(_map_init, _map_max)  # nunca superar el máximo
-map_km_sel = st.slider("📍 Posición en ruta (km)", 0.0, _map_max,
-                        _map_init, 0.1, key="map_sel")
-idx_map = int(np.argmin(np.abs(dist_arr - map_km_sel)))
-sel_ele = float(ele_display[idx_map])
-sel_lat = float(df_raw.iloc[idx_map]['lat'])
-sel_lon = float(df_raw.iloc[idx_map]['lon'])
-
-col_map, col_add = st.columns([3, 1])
-with col_map:
-    fig_map = go.Figure()
-    fig_map.add_trace(go.Scattermap(
-        mode="lines",
-        lon=df_raw['lon'].tolist(), lat=df_raw['lat'].tolist(),
-        line={"width": 3, "color": "#3B82F6"}, name="Ruta", hoverinfo="skip",
-    ))
-    if df_raw2 is not None:
-        fig_map.add_trace(go.Scattermap(
-            mode="lines",
-            lon=df_raw2['lon'].tolist(), lat=df_raw2['lat'].tolist(),
-            line={"width": 2, "color": "#F97316", "dash": "dot"}, name="Ruta 2",
-        ))
-    if st.session_state["waypoints"]:
-        wlons = [df_raw.iloc[int(np.argmin(np.abs(dist_arr-w["km"])))]["lon"]
-                 for w in st.session_state["waypoints"]]
-        wlats = [df_raw.iloc[int(np.argmin(np.abs(dist_arr-w["km"])))]["lat"]
-                 for w in st.session_state["waypoints"]]
-        # Sin mode="text" en Scattermap para evitar el error CORS de maki icons
-        fig_map.add_trace(go.Scattermap(
-            mode="markers",
-            lon=wlons, lat=wlats,
-            marker={"size": 12, "color": "#F97316"},
-            name="Waypoints",
-            hovertext=[f'{w["icon"]} {w["label"]} · {w["km"]:.1f}km' for w in st.session_state["waypoints"]],
-            hoverinfo="text",
-        ))
-    fig_map.add_trace(go.Scattermap(
-        mode="markers", lon=[sel_lon], lat=[sel_lat],
-        marker={"size": 16, "color": "#EF4444"}, name="Selección",
-        hovertemplate=f"km {map_km_sel:.1f} · {sel_ele:.0f} m<extra></extra>",
-    ))
-    fig_map.update_layout(
-        map={"style": "open-street-map",
-             "center": {"lon": sel_lon, "lat": sel_lat}, "zoom": 11},
-        showlegend=False, margin={"l":0,"r":0,"b":0,"t":0}, height=310,
+if show_slope_subgraph:
+    fig_prev = psubplots.make_subplots(
+        rows=2, cols=1, row_heights=[0.78, 0.22],
+        shared_xaxes=True, vertical_spacing=0.05,
     )
-    st.plotly_chart(fig_map, use_container_width=True)
-
-with col_add:
-    st.markdown(f"**km {map_km_sel:.1f}** · {sel_ele:.0f} m")
-    wp_type   = st.selectbox("Tipo", list(WAYPOINT_DEFS.keys()), key="wp_type")
-    wp_name   = st.text_input("Nombre", "Punto", key="wp_name")
-    if st.button("➕ Añadir", use_container_width=True, key="btn_add"):
-        dup = any(abs(w["km"]-map_km_sel) < 0.05 and w["label"] == wp_name
-                  for w in st.session_state["waypoints"])
-        if dup:
-            st.warning("Punto duplicado.")
-        else:
-            st.session_state["waypoints"].append({
-                "km": map_km_sel, "label": wp_name, "ele": sel_ele,
-                "icon": WAYPOINT_DEFS[wp_type]["emoji"], "icon_key": wp_type,
-            })
-            st.success(f"✅ '{wp_name}' añadido")
-            st.rerun()
-
-# ═══════════════════════════════════════════════════════════════════
-# EDITOR DE WAYPOINTS — edición inline de cada punto
-# ═══════════════════════════════════════════════════════════════════
-if st.session_state["waypoints"]:
-    st.markdown("**✏️ Editor de waypoints:**")
-
-    # Inicializar el índice de waypoint en edición
-    if "wp_edit_idx" not in st.session_state:
-        st.session_state["wp_edit_idx"] = None
-
-    for i, wp in enumerate(st.session_state["waypoints"]):
-        # ── Fila de resumen ──────────────────────────────────────────
-        row_cols = st.columns([0.4, 3.5, 1.2, 0.9, 0.9, 0.9])
-        row_cols[0].markdown(
-            f'<span style="font-size:1.3rem;line-height:2rem">{wp["icon"]}</span>',
-            unsafe_allow_html=True,
-        )
-        row_cols[1].markdown(
-            f'<span class="wp-chip"><b>{wp["km"]:.1f} km</b> — {wp["label"]}'
-            f' <em style="opacity:.6">({wp["ele"]:.0f} m)</em></span>',
-            unsafe_allow_html=True,
-        )
-        # Botón editar / cerrar
-        is_editing = st.session_state["wp_edit_idx"] == i
-        edit_label = "✏️ Editar" if not is_editing else "🔼 Cerrar"
-        if row_cols[2].button(edit_label, key=f"edit_btn_{i}", use_container_width=True):
-            st.session_state["wp_edit_idx"] = None if is_editing else i
-            st.rerun()
-        # Subir / bajar orden
-        if row_cols[3].button("▲", key=f"up_{i}", use_container_width=True) and i > 0:
-            st.session_state["waypoints"][i], st.session_state["waypoints"][i-1] = \
-                st.session_state["waypoints"][i-1], st.session_state["waypoints"][i]
-            if st.session_state["wp_edit_idx"] == i:
-                st.session_state["wp_edit_idx"] = i - 1
-            st.rerun()
-        if row_cols[4].button("▼", key=f"dn_{i}", use_container_width=True) \
-                and i < len(st.session_state["waypoints"]) - 1:
-            st.session_state["waypoints"][i], st.session_state["waypoints"][i+1] = \
-                st.session_state["waypoints"][i+1], st.session_state["waypoints"][i]
-            if st.session_state["wp_edit_idx"] == i:
-                st.session_state["wp_edit_idx"] = i + 1
-            st.rerun()
-        if row_cols[5].button("✕", key=f"del_{i}", use_container_width=True):
-            st.session_state["waypoints"].pop(i)
-            if st.session_state["wp_edit_idx"] == i:
-                st.session_state["wp_edit_idx"] = None
-            st.rerun()
-
-        # ── Panel de edición (solo visible si está activo) ────────────
-        if is_editing:
-            with st.container():
-                st.markdown(
-                    '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
-                    'border-radius:10px;padding:14px 18px;margin:4px 0 10px 0;">',
-                    unsafe_allow_html=True,
-                )
-                ec1, ec2, ec3 = st.columns([2, 2, 1])
-
-                # Nombre
-                new_label = ec1.text_input(
-                    "📝 Nombre del punto",
-                    value=wp["label"],
-                    key=f"ed_label_{i}",
-                )
-
-                # Tipo / icono
-                icon_keys = list(WAYPOINT_DEFS.keys())
-                cur_icon_idx = icon_keys.index(wp["icon_key"]) \
-                    if wp["icon_key"] in icon_keys else 0
-                new_icon_key = ec2.selectbox(
-                    "🏷️ Tipo / Icono",
-                    icon_keys,
-                    index=cur_icon_idx,
-                    key=f"ed_icon_{i}",
-                )
-
-                # Km (reposicionar)
-                _ed_max  = round(float(total_km), 1)
-                _ed_init = round(round(float(wp["km"]) / 0.1) * 0.1, 1)
-                _ed_init = min(max(_ed_init, 0.0), _ed_max)
-                new_km = ec3.number_input(
-                    "📍 km",
-                    min_value=0.0,
-                    max_value=float(total_km),
-                    value=float(wp["km"]),
-                    step=0.1,
-                    key=f"ed_km_{i}",
-                    format="%.1f",
-                )
-
-                ec4, ec5, ec6 = st.columns([2, 2, 1])
-
-                # Orientación etiqueta (por waypoint)
-                cur_rot = wp.get("rotation", label_rotation)
-                new_rot = ec4.radio(
-                    "↔️ Orientación etiqueta",
-                    ["Horizontal", "Vertical"],
-                    index=0 if cur_rot == "Horizontal" else 1,
-                    key=f"ed_rot_{i}",
-                    horizontal=True,
-                )
-
-                # Tamaño de fuente
-                cur_fs = wp.get("fontsize", 8)
-                new_fs = ec5.slider(
-                    "🔤 Tamaño texto",
-                    min_value=6, max_value=16,
-                    value=int(cur_fs), step=1,
-                    key=f"ed_fs_{i}",
-                )
-
-                # Posición vertical etiqueta
-                cur_vpos = wp.get("vpos", "Arriba")
-                new_vpos = ec6.selectbox(
-                    "↕️ Posición",
-                    ["Arriba", "Abajo"],
-                    index=0 if cur_vpos == "Arriba" else 1,
-                    key=f"ed_vpos_{i}",
-                )
-
-                # Botón aplicar
-                if st.button("💾 Aplicar cambios", key=f"ed_save_{i}",
-                             use_container_width=False):
-                    # Recalcular elevación si cambió el km
-                    idx_new = int(np.argmin(np.abs(dist_arr - new_km)))
-                    new_ele = float(ele_display[idx_new])
-
-                    st.session_state["waypoints"][i] = {
-                        **wp,
-                        "label":    new_label,
-                        "icon_key": new_icon_key,
-                        "icon":     WAYPOINT_DEFS[new_icon_key]["emoji"],
-                        "km":       float(new_km),
-                        "ele":      new_ele,
-                        "rotation": new_rot,
-                        "fontsize": new_fs,
-                        "vpos":     new_vpos,
-                    }
-                    st.session_state["wp_edit_idx"] = None
-                    st.success(f"✅ '{new_label}' actualizado")
-                    st.rerun()
-
-                st.markdown("</div>", unsafe_allow_html=True)
-
-
-st.divider()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# VISTA PREVIA INTERACTIVA  (Plotly nativo — márgenes correctos)
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown('<div class="sec">👁️ Vista Previa Interactiva</div>', unsafe_allow_html=True)
-
+    def _padd(tr): fig_prev.add_trace(tr, row=1, col=1)
+else:
+    fig_prev = go.Figure()
+    def _padd(tr): fig_prev.add_trace(tr)
 _sl_v  = start_loc   if "start_loc"   in dir() else ""
 _el_v  = end_loc     if "end_loc"     in dir() else ""
 _ct_v  = chart_title if "chart_title" in dir() else ""
@@ -1589,7 +1364,148 @@ else:
 
 st.plotly_chart(fig_prev, use_container_width=True)
 
-# HTML embed se sigue generando para descarga (sin renderizarlo en pantalla)
+# ── Tabs bajo el perfil: Mapa, Añadir waypoint, Editor, Config ──
+_tab_map, _tab_add, _tab_edit, _tab_cfg = st.tabs([
+    "🗺️ Mapa", "➕ Añadir waypoint", "✏️ Editar waypoints", "⚙️ Config detección"
+])
+
+with _tab_map:
+    _map_max  = round(float(total_km), 1)
+    _map_init = round(round(float(total_km / 2) / 0.1) * 0.1, 1)
+    _map_init = min(_map_init, _map_max)
+    map_km_sel = st.slider("📍 Posición en ruta (km)", 0.0, _map_max,
+                            _map_init, 0.1, key="map_sel")
+    idx_map = int(np.argmin(np.abs(dist_arr - map_km_sel)))
+    sel_ele = float(ele_display[idx_map])
+    sel_lat = float(df_raw.iloc[idx_map]['lat'])
+    sel_lon = float(df_raw.iloc[idx_map]['lon'])
+
+    fig_map = go.Figure()
+    fig_map.add_trace(go.Scattermap(
+        mode="lines",
+        lon=df_raw['lon'].tolist(), lat=df_raw['lat'].tolist(),
+        line={"width": 3, "color": line_color}, name="Ruta", hoverinfo="skip",
+    ))
+    if st.session_state["waypoints"]:
+        wlons = [df_raw.iloc[int(np.argmin(np.abs(dist_arr-w["km"])))]["lon"]
+                 for w in st.session_state["waypoints"]]
+        wlats = [df_raw.iloc[int(np.argmin(np.abs(dist_arr-w["km"])))]["lat"]
+                 for w in st.session_state["waypoints"]]
+        fig_map.add_trace(go.Scattermap(
+            mode="markers", lon=wlons, lat=wlats,
+            marker={"size": 12, "color": "#F97316"}, name="Waypoints",
+            hovertext=[f'{w["icon"]} {w["label"]} · {w["km"]:.1f}km' for w in st.session_state["waypoints"]],
+            hoverinfo="text",
+        ))
+    fig_map.add_trace(go.Scattermap(
+        mode="markers", lon=[sel_lon], lat=[sel_lat],
+        marker={"size": 16, "color": "#EF4444"}, name="Selección",
+        hovertemplate=f"km {map_km_sel:.1f} · {sel_ele:.0f} m<extra></extra>",
+    ))
+    fig_map.update_layout(
+        map={"style": "open-street-map",
+             "center": {"lon": sel_lon, "lat": sel_lat}, "zoom": 11},
+        showlegend=False, margin={"l":0,"r":0,"b":0,"t":0}, height=320,
+    )
+    st.plotly_chart(fig_map, use_container_width=True)
+
+with _tab_add:
+    _map_max2  = round(float(total_km), 1)
+    _map_init2 = round(round(float(total_km / 2) / 0.1) * 0.1, 1)
+    _add_km = st.slider("📍 Posición (km)", 0.0, _map_max2, _map_init2, 0.1, key="add_km_sel")
+    _add_idx = int(np.argmin(np.abs(dist_arr - _add_km)))
+    _add_ele = float(ele_display[_add_idx])
+    st.caption(f"Altitud: **{_add_ele:.0f} m**")
+    _ac1, _ac2, _ac3 = st.columns([2, 2, 1])
+    _wp_type = _ac1.selectbox("Tipo", list(WAYPOINT_DEFS.keys()), key="wp_type")
+    _wp_name = _ac2.text_input("Nombre", "Punto", key="wp_name")
+    if _ac3.button("➕ Añadir", use_container_width=True, key="btn_add"):
+        dup = any(abs(w["km"]-_add_km) < 0.05 and w["label"] == _wp_name
+                  for w in st.session_state["waypoints"])
+        if dup:
+            st.warning("Punto duplicado.")
+        else:
+            st.session_state["waypoints"].append({
+                "km": _add_km, "label": _wp_name, "ele": _add_ele,
+                "icon": WAYPOINT_DEFS[_wp_type]["emoji"], "icon_key": _wp_type,
+            })
+            st.success(f"✅ '{_wp_name}' añadido")
+            st.rerun()
+
+with _tab_edit:
+    if not st.session_state["waypoints"]:
+        st.info("No hay waypoints todavía. Usa los botones de arriba o la pestaña 'Añadir'.")
+    else:
+        if "wp_edit_idx" not in st.session_state:
+            st.session_state["wp_edit_idx"] = None
+        for i, wp in enumerate(st.session_state["waypoints"]):
+            row_cols = st.columns([0.4, 3.5, 1.2, 0.9, 0.9, 0.9])
+            row_cols[0].markdown(
+                f'<span style="font-size:1.3rem;line-height:2rem">{wp["icon"]}</span>',
+                unsafe_allow_html=True)
+            row_cols[1].markdown(
+                f'<span class="wp-chip"><b>{wp["km"]:.1f} km</b> — {wp["label"]}'
+                f' <em style="opacity:.6">({wp["ele"]:.0f} m)</em></span>',
+                unsafe_allow_html=True)
+            is_editing = st.session_state["wp_edit_idx"] == i
+            if row_cols[2].button("🔼 Cerrar" if is_editing else "✏️ Editar",
+                                  key=f"edit_btn_{i}", use_container_width=True):
+                st.session_state["wp_edit_idx"] = None if is_editing else i
+                st.rerun()
+            if row_cols[3].button("▲", key=f"up_{i}", use_container_width=True) and i > 0:
+                st.session_state["waypoints"][i], st.session_state["waypoints"][i-1] = \
+                    st.session_state["waypoints"][i-1], st.session_state["waypoints"][i]
+                st.rerun()
+            if row_cols[4].button("▼", key=f"dn_{i}", use_container_width=True) \
+                    and i < len(st.session_state["waypoints"]) - 1:
+                st.session_state["waypoints"][i], st.session_state["waypoints"][i+1] = \
+                    st.session_state["waypoints"][i+1], st.session_state["waypoints"][i]
+                st.rerun()
+            if row_cols[5].button("✕", key=f"del_{i}", use_container_width=True):
+                st.session_state["waypoints"].pop(i)
+                if st.session_state["wp_edit_idx"] == i:
+                    st.session_state["wp_edit_idx"] = None
+                st.rerun()
+            if is_editing:
+                ec1, ec2, ec3 = st.columns([2, 2, 1])
+                new_label = ec1.text_input("📝 Nombre", value=wp["label"], key=f"ed_label_{i}")
+                icon_keys = list(WAYPOINT_DEFS.keys())
+                cur_icon_idx = icon_keys.index(wp["icon_key"]) if wp["icon_key"] in icon_keys else 0
+                new_icon_key = ec2.selectbox("🏷️ Tipo", icon_keys, index=cur_icon_idx, key=f"ed_icon_{i}")
+                new_km = ec3.number_input("📍 km", 0.0, float(total_km),
+                                          float(wp["km"]), 0.1, key=f"ed_km_{i}", format="%.1f")
+                ec4, ec5, ec6 = st.columns([2, 2, 1])
+                cur_rot = wp.get("rotation", label_rotation)
+                new_rot = ec4.radio("↔️ Orientación", ["Horizontal","Vertical"],
+                                    index=0 if cur_rot == "Horizontal" else 1,
+                                    key=f"ed_rot_{i}", horizontal=True)
+                new_fs = ec5.slider("🔤 Tamaño", 6, 16, int(wp.get("fontsize", 8)), 1, key=f"ed_fs_{i}")
+                cur_vpos = wp.get("vpos", "Arriba")
+                new_vpos = ec6.selectbox("↕️ Pos.", ["Arriba","Abajo"],
+                                         index=0 if cur_vpos == "Arriba" else 1, key=f"ed_vpos_{i}")
+                if st.button("💾 Aplicar", key=f"ed_save_{i}"):
+                    idx_new = int(np.argmin(np.abs(dist_arr - new_km)))
+                    st.session_state["waypoints"][i] = {
+                        **wp, "label": new_label, "icon_key": new_icon_key,
+                        "icon": WAYPOINT_DEFS[new_icon_key]["emoji"],
+                        "km": float(new_km), "ele": float(ele_display[idx_new]),
+                        "rotation": new_rot, "fontsize": new_fs, "vpos": new_vpos,
+                    }
+                    st.session_state["wp_edit_idx"] = None
+                    st.rerun()
+
+with _tab_cfg:
+    c_pa1, c_pa2, c_pa3, c_pa4 = st.columns(4)
+    st.session_state["village_min_drop"] = c_pa1.number_input(
+        "Pueblos: caída mín. (m)", 10, 300, 40, 10,
+        help="Metros de descenso para considerar un valle como pueblo")
+    st.session_state["village_min_dist"] = c_pa2.number_input(
+        "Pueblos: dist. mín. (km)", 0.5, 10.0, 1.5, 0.5,
+        help="Separación mínima entre pueblos")
+    c_pa3.number_input("Puertos: prominencia mín. (m)", 50, 500, 100, 25, key="pass_min_gain")
+    c_pa4.number_input("Puertos: dist. mín. (km)", 0.5, 10.0, 1.0, 0.5, key="pass_min_dist")
+
+# HTML embed para descarga
 html_embed_str = build_html_embed(
     dist_arr, ele_display, df_raw, total_km,
     min_ele, max_ele, gain, loss, max_slope,
@@ -1635,20 +1551,6 @@ if df_raw2 is not None:
     cp1.info(f"**Ruta 1:** {total_km:.1f} km · ↑{gain:.0f}m · ↓{loss:.0f}m · ITRA {itra['category']} ({itra['ed']} ED)")
     cp2.info(f"**Ruta 2:** {total_km2:.1f} km · ↑{gain2:.0f}m · ↓{loss2:.0f}m · ITRA {itra2['category']} ({itra2['ed']} ED)")
 
-st.divider()
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TABLA DE SECTORES  (FEATURE 5)
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown('<div class="sec">📊 Tabla de Sectores</div>', unsafe_allow_html=True)
-n_sec = st.slider("Número de sectores", 4, 20, 10, 1)
-df_sectors = compute_sectors(dist_arr, ele_display, n_sectors=n_sec)
-st.dataframe(df_sectors, use_container_width=True, hide_index=True)
-
-buf_csv = io.StringIO()
-df_sectors.to_csv(buf_csv, index=False)
-st.download_button("📥 Descargar tabla CSV", buf_csv.getvalue(),
-                   "sectores.csv", "text/csv", key="dl_csv")
 st.divider()
 
 # ─────────────────────────────────────────────────────────────────────────────
