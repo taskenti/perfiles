@@ -2101,7 +2101,9 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
     _buf_png.seek(0)
 
     _buf_jpg = io.BytesIO()
-    _mide_fig.savefig(_buf_jpg, format="jpeg", dpi=150, bbox_inches="tight", quality=92)
+    # JPEG no admite canal alpha — forzamos fondo blanco opaco
+    _mide_fig.savefig(_buf_jpg, format="jpeg", dpi=150, bbox_inches="tight",
+                      facecolor="#E8E8E8", quality=92)
     _buf_jpg.seek(0)
 
     _buf_svg = io.BytesIO()
