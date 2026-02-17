@@ -533,55 +533,50 @@ def build_static_fig(
                     fontsize=6.5, color=text_color, alpha=0.55)
 
     # ══════════════════════════════════════════════════════
-    # CAPA 5 — Etiquetas de localidades
+    # CAPA 5 — Etiquetas de localidades (SIEMPRE VERTICAL, sin icono)
     # ══════════════════════════════════════════════════════
-    # Las localidades van SIEMPRE en vertical.
-    # Para que el texto no se solape con el borde del marco:
-    #   - Salida: el marcador está en x=0 pero el texto se desplaza
-    #     ligeramente hacia la derecha (hacia el interior del gráfico).
-    #   - Llegada: el marcador está en x=total_km pero el texto se desplaza
-    #     ligeramente hacia la izquierda (hacia el interior del gráfico).
-    # El offset en X se expresa como fracción del ancho total de la ruta.
-    _x_inset = total_km * 0.012   # ~1.2% del ancho → queda dentro del marco
-
-    # Offset vertical: suficiente para que el texto no tape el marcador
-    _y_off_loc = padding * 0.9
+    # Offset horizontal: mueve el texto DENTRO del marco para que no se corte
+    _x_inset   = total_km * 0.015   # 1.5% del ancho total
+    _y_off_loc = padding * 0.8
 
     if start_loc:
-        ax.plot(0, float(ele_display[0]),
-                marker="D", color="#16A34A",
-                markersize=9, markeredgecolor="white", markeredgewidth=1.5, zorder=6)
+        # Línea vertical fina desde la base hasta el marcador
+        ax.axvline(x=0, color="#16A34A", linewidth=1.2, alpha=0.4,
+                   linestyle="--", zorder=3)
         ax.text(
-            _x_inset,                    # ligeramente a la derecha del borde
+            _x_inset,
             float(ele_display[0]) + _y_off_loc,
             start_loc,
-            ha="left",                   # el texto crece hacia la derecha (interior)
+            ha="left",       # crece hacia la derecha → dentro del gráfico
             va="bottom",
-            rotation=90,
-            fontsize=9, fontweight="bold", color=text_color,
+            rotation=90,     # SIEMPRE VERTICAL
+            fontsize=9,
+            fontweight="bold",
+            color=text_color,
             bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
                       pad=3, boxstyle="round,pad=0.35"),
             zorder=5,
         )
 
     if end_loc:
-        ax.plot(total_km, float(ele_display[-1]),
-                marker="D", color="#0F172A",
-                markersize=9, markeredgecolor="white", markeredgewidth=1.5, zorder=6)
+        ax.axvline(x=total_km, color="#0F172A", linewidth=1.2, alpha=0.4,
+                   linestyle="--", zorder=3)
         ax.text(
-            total_km - _x_inset,         # ligeramente a la izquierda del borde
+            total_km - _x_inset,
             float(ele_display[-1]) + _y_off_loc,
             end_loc,
-            ha="right",                  # el texto crece hacia la izquierda (interior)
+            ha="right",      # crece hacia la izquierda → dentro del gráfico
             va="bottom",
-            rotation=90,
-            fontsize=9, fontweight="bold", color=text_color,
+            rotation=90,     # SIEMPRE VERTICAL
+            fontsize=9,
+            fontweight="bold",
+            color=text_color,
             bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
                       pad=3, boxstyle="round,pad=0.35"),
             zorder=5,
         )
 
-    # Variable aún usada por waypoints intermedios
+    # Usado por waypoints intermedios
     rotation_deg   = 90 if label_rotation == "Vertical" else 0
     y_offset_label = padding * (1.0 if label_rotation == "Vertical" else 0.5)
 
@@ -820,7 +815,7 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
         for km_mark in np.arange(km_interval, total_km, km_interval):
             fig.add_vline(x=float(km_mark), line=dict(color="#94a3b8", width=1, dash="dot"))
 
-    # ── Start / End ──
+    # ── Start / End — texto vertical con add_annotation, sin icono ──
     for x_pos, name, col in [
         (0.0,      start_loc, "#16A34A"),
         (total_km, end_loc,   "#0F172A"),
@@ -828,14 +823,32 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
         if not name:
             continue
         idx = int(np.argmin(np.abs(dist_arr - x_pos)))
+        # Marcador simple de punto
         _add(go.Scatter(
             x=[float(dist_arr[idx])], y=[float(ele_display[idx])],
-            mode="markers+text", text=[name], textposition="top center",
-            marker=dict(color=col, size=12, symbol="diamond",
+            mode="markers",
+            marker=dict(color=col, size=9, symbol="circle",
                         line=dict(color="white", width=2)),
             showlegend=False,
             hovertemplate=f"<b>{name}</b><br>{ele_display[idx]:.0f} m<extra></extra>",
         ))
+        # Anotación vertical — sin diamante, sin icono, siempre vertical
+        _is_start = (x_pos == 0.0)
+        _ann_kw = dict(row=1, col=1) if show_slope_subgraph else {}
+        fig.add_annotation(
+            x=float(dist_arr[idx]),
+            y=float(ele_display[idx]),
+            text=name,
+            showarrow=False,
+            textangle=-90,
+            xshift=14 if _is_start else -14,
+            xanchor="left" if _is_start else "right",
+            yanchor="bottom",
+            font=dict(size=11, color=col),
+            bgcolor=bg_color,
+            opacity=0.92,
+            **_ann_kw,
+        )
 
     # ── Layout ──
     grid_col = "#e2e8f0" if show_grid else "rgba(0,0,0,0)"
@@ -1480,14 +1493,36 @@ for _xp, _nm, _nc in [(0.0, _sl_v, "#16A34A"), (total_km, _el_v, "#0F172A")]:
     if not _nm:
         continue
     _idx = int(np.argmin(np.abs(dist_arr - _xp)))
+    # Solo marcador de punto — sin texto inline (que sale horizontal en Plotly)
     _padd(go.Scatter(
         x=[float(dist_arr[_idx])], y=[float(ele_display[_idx])],
-        mode="markers+text", text=[_nm], textposition="top center",
-        marker=dict(color=_nc, size=12, symbol="diamond",
+        mode="markers",
+        marker=dict(color=_nc, size=10, symbol="circle",
                     line=dict(color="white", width=2)),
         showlegend=False,
         hovertemplate=f"<b>{_nm}</b><br>{ele_display[_idx]:.0f} m<extra></extra>",
     ))
+    # Texto vertical con add_annotation (textangle=-90 = vertical)
+    # Salida: ax ancla a la derecha del punto; Llegada: a la izquierda
+    _is_start = (_xp == 0.0)
+    _ann_x    = float(dist_arr[_idx])
+    _ann_xshift = 14 if _is_start else -14   # px hacia el interior
+    _ann_xanchor = "left" if _is_start else "right"
+    _ann_kw = dict(row=1, col=1) if show_slope_subgraph else {}
+    fig_prev.add_annotation(
+        x=_ann_x,
+        y=float(ele_display[_idx]),
+        text=_nm,
+        showarrow=False,
+        textangle=-90,           # VERTICAL
+        xshift=_ann_xshift,
+        xanchor=_ann_xanchor,
+        yanchor="bottom",
+        font=dict(size=11, color=_nc, family="Syne, system-ui, sans-serif"),
+        bgcolor=bg_color,
+        opacity=0.92,
+        **_ann_kw,
+    )
 
 # ── Marcadores km ──
 if show_km_markers:
