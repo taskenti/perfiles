@@ -334,6 +334,266 @@ def mide_score_color(score: int) -> str:
     return ["", "#22C55E", "#84CC16", "#F59E0B", "#EF4444", "#7C3AED"][score]
 
 
+def build_mide_figure(
+    route_name: str,
+    trip_type: str,
+    dist_km: float, gain_m: float, loss_m: float,
+    t_hhmm: str,
+    medio: int, orientacion: int, desplazamiento: int, esfuerzo: int,
+    sym_T: bool, sym_R: bool, sym_N: bool,
+    rapel_m: float, nieve_deg: float,
+    dist_arr, ele_display,
+    waypoints: list,
+) -> plt.Figure:
+    """
+    Genera la ficha MIDE oficial como figura Matplotlib (PNG/JPG/SVG).
+    Reproduce el diseño de la cartografía oficial del Gobierno de Aragón.
+    """
+    import matplotlib.patches as mpatches
+    import matplotlib.patheffects as pe
+    from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+    import matplotlib.gridspec as gridspec
+    from matplotlib.colors import LinearSegmentedColormap
+
+    # ── Dimensiones ──────────────────────────────────────────────────────
+    FW, FH = 11.5, 9.0   # pulgadas  → ~1380×1080 px a 120 dpi
+    DPI     = 120
+    BG      = "#E8E8E8"   # gris claro fondo exterior
+    CARD    = "#F2F2F2"   # interior de la tarjeta
+    WHITE   = "#FFFFFF"
+    BLACK   = "#1A1A1A"
+    DGRAY   = "#4A4A4A"
+    LGRAY   = "#D0D0D0"
+    BORDER  = "#888888"
+    RED     = "#CC0000"   # color acento para alertas
+
+    fig = plt.figure(figsize=(FW, FH), dpi=DPI, facecolor=BG)
+
+    # Layout: header 14% | tabla 32% | perfil 54%
+    gs = gridspec.GridSpec(
+        3, 1, figure=fig,
+        height_ratios=[0.13, 0.32, 0.55],
+        hspace=0.0,
+        left=0.04, right=0.96, top=0.97, bottom=0.03,
+    )
+
+    ax_hdr  = fig.add_subplot(gs[0])
+    ax_tbl  = fig.add_subplot(gs[1])
+    ax_prof = fig.add_subplot(gs[2])
+
+    for ax in (ax_hdr, ax_tbl, ax_prof):
+        ax.set_facecolor(CARD)
+        for sp in ax.spines.values():
+            sp.set_edgecolor(BORDER)
+            sp.set_linewidth(1.5)
+
+    # ════════════════════════════════════════════════════════════════════
+    # HEADER — "MIDE" + nombre ruta
+    # ════════════════════════════════════════════════════════════════════
+    ax_hdr.set_xlim(0, 1); ax_hdr.set_ylim(0, 1)
+    ax_hdr.axis("off")
+    ax_hdr.set_facecolor(CARD)
+
+    # Rectángulo "MIDE" con borde negro grueso
+    ax_hdr.add_patch(FancyBboxPatch(
+        (0.01, 0.08), 0.14, 0.84,
+        boxstyle="round,pad=0.01",
+        facecolor=WHITE, edgecolor=BLACK, linewidth=3,
+        transform=ax_hdr.transAxes, zorder=2,
+    ))
+    ax_hdr.text(0.08, 0.5, "MIDE",
+                ha="center", va="center",
+                fontsize=34, fontweight="black",
+                color=BLACK, fontfamily="DejaVu Sans",
+                transform=ax_hdr.transAxes, zorder=3)
+
+    # Nombre de la ruta
+    _rname = route_name or "Ruta sin nombre"
+    if len(_rname) > 60: _rname = _rname[:57] + "…"
+    ax_hdr.text(0.17, 0.5, _rname,
+                ha="left", va="center",
+                fontsize=13, fontweight="bold", color=DGRAY,
+                transform=ax_hdr.transAxes)
+
+    # ════════════════════════════════════════════════════════════════════
+    # TABLA — izquierda (valoraciones) + derecha (datos de referencia)
+    # ════════════════════════════════════════════════════════════════════
+    ax_tbl.set_xlim(0, 1); ax_tbl.set_ylim(0, 1)
+    ax_tbl.axis("off")
+
+    # Línea divisoria vertical
+    ax_tbl.axvline(0.50, color=BORDER, linewidth=1.2, ymin=0.0, ymax=1.0)
+    # Líneas horizontales separadoras (5 filas en cada columna)
+    N_ROWS = 5
+    for r in range(N_ROWS + 1):
+        y = r / N_ROWS
+        ax_tbl.axhline(1 - y, color=LGRAY, linewidth=0.8, xmin=0.0, xmax=1.0)
+
+    # ── Definir contenido filas izquierda ──
+    # Col izq: (etiqueta, valor, símbolo_texto)
+    sym_extra = ""
+    if sym_T: sym_extra += "T"
+    if sym_R: sym_extra += "R"
+    if sym_N: sym_extra += "N"
+
+    left_rows = [
+        ("severidad del medio natural",    str(medio),        "⚠"),
+        ("orientación en el itinerario",   str(orientacion),  "⊙"),
+        ("dificultad en el desplazamiento",str(desplazamiento),"⚙"),
+        ("cantidad de esfuerzo necesario", str(esfuerzo),     "↻"),
+    ]
+    # Quinta fila: simbología técnica
+    if sym_T or sym_R or sym_N:
+        tech_parts = []
+        if sym_T: tech_parts.append(f"T (escalada)")
+        if sym_R: tech_parts.append(f"R ({int(rapel_m)}m rápel)")
+        if sym_N: tech_parts.append(f"N ({int(nieve_deg)}°)")
+        left_rows.append(("dificultad técnica", " · ".join(tech_parts), "△"))
+    else:
+        left_rows.append(("dificultad técnica", "—", "△"))
+
+    # Col derecha: (icono_texto, etiqueta, valor_bold)
+    right_rows = [
+        ("⊙", "horario",              t_hhmm),
+        ("△", "desnivel de subida",  f"{int(gain_m):,} m".replace(",",".")),
+        ("▽", "desnivel de bajada",  f"{int(loss_m):,} m".replace(",",".")),
+        ("═", "distancia horizontal",f"{dist_km:.1f} km"),
+        ("↺", "tipo de recorrido",   trip_type),
+    ]
+
+    ROW_H = 1.0 / N_ROWS
+    for i, (lbl, val, sym) in enumerate(left_rows):
+        y_c = 1.0 - (i + 0.5) * ROW_H  # centro vertical de la fila
+        # Etiqueta
+        ax_tbl.text(0.02, y_c, lbl,
+                    ha="left", va="center", fontsize=8.5, color=BLACK)
+        # Número en negrita
+        ax_tbl.text(0.35, y_c, val,
+                    ha="right", va="center", fontsize=11, fontweight="bold", color=BLACK)
+        # Símbolo MIDE (aproximado con texto)
+        ax_tbl.text(0.41, y_c, sym,
+                    ha="center", va="center", fontsize=14,
+                    color=DGRAY,
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor=LGRAY,
+                              edgecolor=BORDER, linewidth=1))
+
+    for i, (sym, lbl, val) in enumerate(right_rows):
+        y_c = 1.0 - (i + 0.5) * ROW_H
+        # Icono circular
+        ax_tbl.text(0.53, y_c, sym,
+                    ha="center", va="center", fontsize=13, color=DGRAY,
+                    bbox=dict(boxstyle="circle,pad=0.25", facecolor=LGRAY,
+                              edgecolor=BORDER, linewidth=1))
+        # Etiqueta
+        ax_tbl.text(0.57, y_c, lbl,
+                    ha="left", va="center", fontsize=8.5, color=BLACK)
+        # Valor en negrita
+        ax_tbl.text(0.98, y_c, val,
+                    ha="right", va="center", fontsize=10, fontweight="bold", color=BLACK)
+
+    # ════════════════════════════════════════════════════════════════════
+    # PERFIL ALTIMÉTRICO  — reproduce el diseño MIDE oficial
+    # ════════════════════════════════════════════════════════════════════
+    ax_prof.tick_params(colors=DGRAY, labelsize=8)
+    for sp in ax_prof.spines.values():
+        sp.set_edgecolor(BORDER); sp.set_linewidth(1.2)
+    ax_prof.set_facecolor(CARD)
+
+    # Etiqueta "perfil ────"
+    ax_prof.text(0.018, 0.97, "— perfil",
+                 transform=ax_prof.transAxes,
+                 ha="left", va="top", fontsize=11, fontstyle="italic",
+                 fontweight="bold", color=BLACK)
+
+    # Eje X: "m 0 ... N km"
+    ax_prof.set_xlabel("", labelpad=2)
+    ax_prof.set_xlim(0, dist_arr[-1])
+
+    xticks = np.arange(0, dist_arr[-1] + 0.01, 1.0)
+    ax_prof.set_xticks(xticks)
+    _xlabels = []
+    for _x in xticks:
+        if _x == 0:         _xlabels.append(f"m  0")
+        elif _x == xticks[-1]: _xlabels.append(f"{int(round(_x))} km")
+        else:               _xlabels.append(str(int(round(_x))))
+    ax_prof.set_xticklabels(_xlabels, fontsize=8, color=DGRAY)
+
+    # Eje Y: altitudes en múltiplos de 200
+    _mn = ele_display.min()
+    _mx = ele_display.max()
+    _pad_p = (_mx - _mn) * 0.18
+    _y_bot = _mn - _pad_p * 0.5
+    _y_top = _mx + _pad_p * 2.2   # espacio para waypoint labels
+    ax_prof.set_ylim(_y_bot, _y_top)
+
+    _y200 = np.arange(int(_mn // 200) * 200, _mx + 200, 200)
+    ax_prof.set_yticks(_y200)
+    ax_prof.set_yticklabels([f"{int(y):,}".replace(",",".") for y in _y200],
+                             fontsize=8, color=DGRAY)
+    ax_prof.yaxis.set_label_coords(-0.05, 0.5)
+
+    # Rejilla ligera
+    ax_prof.set_axisbelow(True)
+    ax_prof.yaxis.grid(True, color=LGRAY, linewidth=0.7, linestyle="-")
+    ax_prof.xaxis.grid(True, color=LGRAY, linewidth=0.6, linestyle="-")
+
+    # ── Relleno degradado oscuro→claro (efecto pendiente MIDE) ──
+    _base = _y_bot
+    _N    = len(dist_arr)
+    # Usamos un mapa de grises inverso: más oscuro arriba, claro en la base
+    _cmap_mide = LinearSegmentedColormap.from_list(
+        "mide_fill", ["#AAAAAA", "#1A1A1A"])
+
+    for _i in range(_N - 1):
+        _x0, _x1 = dist_arr[_i], dist_arr[_i + 1]
+        _e0, _e1 = ele_display[_i], ele_display[_i + 1]
+        _t = (_e0 - _mn) / max(_mx - _mn, 1)  # 0=min, 1=max
+        _col = _cmap_mide(_t)
+        ax_prof.fill_between(
+            [_x0, _x1], [_base, _base], [_e0, _e1],
+            color=_col, alpha=0.85, linewidth=0, zorder=2,
+        )
+
+    # Línea del perfil encima
+    ax_prof.plot(dist_arr, ele_display,
+                 color=BLACK, linewidth=1.8, zorder=3,
+                 solid_capstyle="round", solid_joinstyle="round")
+
+    # ── Waypoints ──
+    for wp in waypoints:
+        _xi = int(np.argmin(np.abs(dist_arr - wp["km"])))
+        _xe = float(dist_arr[_xi])
+        _ye = float(ele_display[_xi])
+        # Marcador círculo estilo MIDE
+        ax_prof.plot(_xe, _ye, "o",
+                     color=WHITE, markersize=7,
+                     markeredgecolor=BLACK, markeredgewidth=1.8, zorder=5)
+        # Línea vertical fina al eje
+        ax_prof.plot([_xe, _xe], [_base, _ye],
+                     color=BLACK, linewidth=0.6, linestyle="--",
+                     alpha=0.4, zorder=3)
+        # Texto del waypoint — dos líneas si es largo
+        _lbl = wp.get("label", "")
+        _lines = textwrap.wrap(_lbl, 14)
+        _txt = "\n".join(_lines[:3])
+        ax_prof.text(_xe, _ye + _pad_p * 0.55, _txt,
+                     ha="center", va="bottom",
+                     fontsize=7.5, fontweight="bold", color=BLACK,
+                     multialignment="center",
+                     zorder=6)
+
+    # Leyenda "punto de interés"
+    ax_prof.plot([], [], "o",
+                 color=WHITE, markersize=6,
+                 markeredgecolor=BLACK, markeredgewidth=1.5,
+                 label="punto de interés")
+    ax_prof.legend(loc="upper left", fontsize=7.5, framealpha=0,
+                   handlelength=1, borderpad=0.3,
+                   labelcolor=DGRAY)
+
+    fig.tight_layout(pad=0.3)
+    return fig
+
 def _smooth_for_peaks(ele: np.ndarray) -> np.ndarray:
     """Suavizado estándar para find_peaks."""
     w = max(5, len(ele) // 200)
@@ -1798,8 +2058,81 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
         st.markdown(f"**Factores de riesgo ({len(_selected_risks)}):** " +
                     " · ".join(f"_{r}_" for r in _selected_risks))
 
-    # Botón exportar ficha como texto
-    _ficha_txt = f"""FICHA MIDE — {_ct or uploaded_file.name}
+    # ── FICHA VISUAL MATPLOTLIB ───────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("### 🖼️ Ficha MIDE oficial — exportar imagen")
+
+    # Construir la figura
+    _mide_fig = build_mide_figure(
+        route_name      = _ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else ""),
+        trip_type       = _trip_type,
+        dist_km         = _m_dist,
+        gain_m          = _m_gain,
+        loss_m          = _m_loss,
+        t_hhmm          = _mide_e["hhmm"],
+        medio           = _medio_score,
+        orientacion     = _orient_score,
+        desplazamiento  = _displac_score,
+        esfuerzo        = _mide_e["effort"],
+        sym_T           = _sym_T,
+        sym_R           = _sym_R,
+        sym_N           = _sym_N,
+        rapel_m         = float(_rapel_m) if _rapel_m else 0.0,
+        nieve_deg       = float(_nieve_deg) if _nieve_deg else 0.0,
+        dist_arr        = dist_arr,
+        ele_display     = ele_display,
+        waypoints       = st.session_state.get("waypoints", []),
+    )
+
+    # Vista previa en Streamlit
+    st.pyplot(_mide_fig, use_container_width=True)
+
+    # Generar buffers en memoria
+    _fname_base = (_ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else "MIDE")).replace(" ","_")
+
+    _buf_png = io.BytesIO()
+    _mide_fig.savefig(_buf_png, format="png", dpi=150, bbox_inches="tight")
+    _buf_png.seek(0)
+
+    _buf_jpg = io.BytesIO()
+    _mide_fig.savefig(_buf_jpg, format="jpeg", dpi=150, bbox_inches="tight", quality=92)
+    _buf_jpg.seek(0)
+
+    _buf_svg = io.BytesIO()
+    _mide_fig.savefig(_buf_svg, format="svg", bbox_inches="tight")
+    _buf_svg.seek(0)
+
+    plt.close(_mide_fig)
+
+    # Botones de descarga en una fila
+    _dl1, _dl2, _dl3, _dl4 = st.columns(4)
+    _dl1.download_button(
+        "⬇️ PNG",
+        _buf_png,
+        file_name=f"{_fname_base}_MIDE.png",
+        mime="image/png",
+        use_container_width=True,
+        key="dl_mide_png",
+    )
+    _dl2.download_button(
+        "⬇️ JPG",
+        _buf_jpg,
+        file_name=f"{_fname_base}_MIDE.jpg",
+        mime="image/jpeg",
+        use_container_width=True,
+        key="dl_mide_jpg",
+    )
+    _dl3.download_button(
+        "⬇️ SVG",
+        _buf_svg,
+        file_name=f"{_fname_base}_MIDE.svg",
+        mime="image/svg+xml",
+        use_container_width=True,
+        key="dl_mide_svg",
+    )
+
+    # TXT resumen
+    _ficha_txt = f"""FICHA MIDE — {_ct or (uploaded_file.name if uploaded_file else '')}
 {'='*50}
 Tipo de recorrido: {_trip_type}
 Distancia: {_m_dist:.2f} km | Subida: {_m_gain:.0f}m | Bajada: {_m_loss:.0f}m
@@ -1807,20 +2140,21 @@ Tiempo estimado MIDE: {_mide_e['hhmm']}
 Terreno: {_terrain}
 
 VALORACIONES MIDE
-  Esfuerzo:       {_mide_e['effort']}/5 — {mide_score_label(_mide_e['effort'])}
-  Orientación:    {_orient_score}/5 — {mide_score_label(_orient_score)}
-  Desplazamiento: {_displac_score}/5 — {mide_score_label(_displac_score)}
-  Medio:          {_medio_score}/5 — {mide_score_label(_medio_score)}
+  Severidad del medio:    {_medio_score}/5 — {mide_score_label(_medio_score)}
+  Orientación:            {_orient_score}/5 — {mide_score_label(_orient_score)}
+  Desplazamiento:         {_displac_score}/5 — {mide_score_label(_displac_score)}
+  Esfuerzo:               {_mide_e['effort']}/5 — {mide_score_label(_mide_e['effort'])}
 
-{'Símbolos: ' + ' '.join(['T' if _sym_T else '', 'R' if _sym_R else '', 'N' if _sym_N else '']).strip() if any([_sym_T,_sym_R,_sym_N]) else ''}
+{'Símbolos: ' + ' '.join(filter(None,['T' if _sym_T else '','R' if _sym_R else '','N' if _sym_N else ''])) if any([_sym_T,_sym_R,_sym_N]) else ''}
 {'Factores de riesgo: ' + ', '.join(_selected_risks) if _selected_risks else ''}
 """
-    st.download_button(
-        "📄 Exportar ficha MIDE (.txt)",
+    _dl4.download_button(
+        "⬇️ TXT",
         _ficha_txt.strip(),
-        file_name=f"{(uploaded_file.name or 'ruta').replace('.gpx','')}_MIDE.txt",
+        file_name=f"{_fname_base}_MIDE.txt",
         mime="text/plain",
-        key="dl_mide",
+        use_container_width=True,
+        key="dl_mide_txt",
     )
 
 st.divider()
