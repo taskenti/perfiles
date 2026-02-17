@@ -845,9 +845,9 @@ def build_static_fig(
                     color=seg_cols[i], linewidth=line_width,  # usa el grosor configurado
                     solid_capstyle="round", zorder=3)
     else:
-        # ── FEATURE 9: Sombra 3D bajo la línea ──
-        ax.plot(dist_arr + dist_arr[-1]*0.003, ele_display - (max_ele-min_ele)*0.018,
-                color="#00000022", linewidth=line_width+3, zorder=2,
+        # ── FEATURE 9: Sombra 3D bajo la línea (sin offset X) ──
+        ax.plot(dist_arr, ele_display - (max_ele - min_ele) * 0.018,
+                color="#00000022", linewidth=line_width + 3, zorder=2,
                 solid_capstyle="round", solid_joinstyle="round")
         ax.plot(dist_arr, ele_display,
                 color=line_color, linewidth=line_width, zorder=3,
@@ -888,9 +888,10 @@ def build_static_fig(
                 seg_d = dist_arr[mask]
                 seg_len = (seg_d[-1] - seg_d[0]) * 1000
                 avg_s = (seg_e[-1] - seg_e[0]) / seg_len * 100 if seg_len > 0 else 0
-                ax.text(xv - km_interval/2, min_ele - padding * 0.55,
+                ax.text(xv - km_interval/2, min_ele - padding * 0.35,
                         f"{avg_s:+.1f}%", ha="center", va="top",
-                        fontsize=6.5, color=slope_color(avg_s), alpha=0.9, fontweight="600")
+                        fontsize=6.5, color=slope_color(avg_s), alpha=0.9,
+                        fontweight="600", clip_on=True)
             ax.text(xv, min_ele - padding * 0.25,
                     f"{km_mark:.0f}km", ha="center", va="top",
                     fontsize=6.5, color=text_color, alpha=0.55)
@@ -974,10 +975,9 @@ def build_static_fig(
     stats_txt = (f"↑ {gain:.0f}m  ↓ {loss:.0f}m  "
                  f"⬆ {max_ele:.0f}m  ⬇ {min_ele:.0f}m  "
                  f"≈ {total_km:.1f}km  max {max_slope:.1f}%")
-    # Posición: dentro del área del gráfico, esquina inferior derecha,
-    # por ENCIMA del eje X para no solapar etiquetas de km
-    ax.text(0.99, 0.04, stats_txt, transform=ax.transAxes,
-            fontsize=6.5, color=text_color, alpha=0.65,
+    # Posición: esquina inferior derecha, dentro del área de datos (no sobre el eje)
+    ax.text(0.99, 0.07, stats_txt, transform=ax.transAxes,
+            fontsize=6.5, color=text_color, alpha=0.55,
             va="bottom", ha="right", fontfamily="monospace")
 
     if chart_title:
@@ -1001,7 +1001,11 @@ def build_static_fig(
     ax.set_ylabel("Altitud (m)", color=text_color, fontsize=10, fontweight="bold")
     ax.tick_params(colors=text_color, labelsize=8)
     ax.set_ylim(base_fill, max_ele + padding * extra_top_factor)
-    right_margin = 1.06 if end_loc else 1.02
+    # El eje X llega exactamente hasta el final del track.
+    # Si hay etiqueta de llegada, añadimos un margen visual mínimo (1%)
+    # para que la etiqueta no quede cortada por el borde del frame,
+    # pero el relleno y la línea siempre cubren hasta dist_arr[-1].
+    right_margin = 1.01 if end_loc else 1.0
     ax.set_xlim(0, total_km * right_margin)
 
     if not show_slope_subgraph:
@@ -1297,6 +1301,9 @@ with st.sidebar:
         text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
         line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
         fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.01)
+        transparent_bg = st.checkbox("🪟 Fondo transparente (PNG/SVG)",
+                                      value=False,
+                                      help="Exporta sin fondo — útil para superponer sobre imágenes o webs con fondo personalizado. Solo funciona en PNG y SVG (JPEG no soporta transparencia).")
 
     # ── Presets de estilo ──
     with st.expander("💾 Presets de estilo", expanded=False):
@@ -1708,7 +1715,7 @@ else:
     fig_prev.update_layout(
         **_layout_prev,
         xaxis=dict(title="Distancia (km)", showgrid=show_grid, gridcolor=_grid_col,
-                   zeroline=False, range=[0, total_km * 1.02],
+                   zeroline=False, range=[0, total_km],
                    title_font=dict(color=text_color), tickfont=dict(color=text_color)),
         yaxis=dict(title="Altitud (m)", showgrid=show_grid, gridcolor=_grid_col,
                    zeroline=False, range=_yrange,
@@ -2232,13 +2239,18 @@ with tab_std:
                             ("jpg","image/jpeg","dl_jpg"),
                             ("svg","image/svg+xml","dl_svg")]:
         buf = io.BytesIO()
-        kw  = dict(format=fmt, dpi=200, bbox_inches="tight",
-                   facecolor=bg_color, edgecolor="none")
+        # PNG y SVG soportan transparencia; JPG no
+        _use_transparent = transparent_bg and fmt != "jpg"
+        kw = dict(format=fmt, dpi=200, bbox_inches="tight",
+                  facecolor="none" if _use_transparent else bg_color,
+                  edgecolor="none",
+                  transparent=_use_transparent)
         if fmt == "jpg":
             kw["pil_kwargs"] = {"quality": 95}
         fig_s.savefig(buf, **kw)
         buf.seek(0)
-        st.download_button(f"💾 {fmt.upper()}", buf.getvalue(),
+        _label = f"💾 {fmt.upper()}" + (" (transparente)" if _use_transparent else "")
+        st.download_button(_label, buf.getvalue(),
                            f"{fn}_perfil.{fmt}", mime, key=key)
     plt.close(fig_s)
 
@@ -2250,7 +2262,8 @@ with tab_social:
     fig_soc = build_static_fig(**{**common_kwargs, "fig_w_px": sw, "fig_h_px": sh})
     buf_soc = io.BytesIO()
     fig_soc.savefig(buf_soc, format="png", dpi=150, bbox_inches="tight",
-                    facecolor=bg_color, edgecolor="none")
+                    facecolor="none" if transparent_bg else bg_color,
+                    edgecolor="none", transparent=transparent_bg)
     buf_soc.seek(0)
     plt.close(fig_soc)
     st.download_button(f"💾 PNG {sw}×{sh}", buf_soc.getvalue(),
@@ -2329,7 +2342,8 @@ with tab_batch:
                 )
                 buf_b = io.BytesIO()
                 fig_b.savefig(buf_b, format="png", dpi=150, bbox_inches="tight",
-                              facecolor=bg_color, edgecolor="none")
+                              facecolor="none" if transparent_bg else bg_color,
+                              edgecolor="none", transparent=transparent_bg)
                 buf_b.seek(0)
                 plt.close(fig_b)
                 zf.writestr(bf.name.replace(".gpx","_perfil.png"), buf_b.getvalue())
