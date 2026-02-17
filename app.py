@@ -2100,11 +2100,22 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
     _mide_fig.savefig(_buf_png, format="png", dpi=150, bbox_inches="tight")
     _buf_png.seek(0)
 
-    _buf_jpg = io.BytesIO()
-    # JPEG no admite canal alpha — forzamos fondo blanco opaco
-    _mide_fig.savefig(_buf_jpg, format="jpeg", dpi=150, bbox_inches="tight",
-                      facecolor="#E8E8E8", quality=92)
-    _buf_jpg.seek(0)
+    # JPEG no admite alpha — convertir PNG→JPEG via PIL
+    try:
+        from PIL import Image as _PILImage
+        _img_rgba = _PILImage.open(_buf_png)
+        _img_rgb  = _PILImage.new("RGB", _img_rgba.size, (232, 232, 232))
+        _img_rgb.paste(_img_rgba, mask=_img_rgba.split()[3] if _img_rgba.mode == "RGBA" else None)
+        _buf_jpg = io.BytesIO()
+        _img_rgb.save(_buf_jpg, format="JPEG", quality=92)
+        _buf_jpg.seek(0)
+        _buf_png.seek(0)   # rebobinar PNG para descarga
+    except ImportError:
+        # Fallback sin PIL: guardar como JPEG directamente sin quality ni alpha
+        _buf_jpg = io.BytesIO()
+        _mide_fig.savefig(_buf_jpg, format="jpeg", dpi=150, bbox_inches="tight")
+        _buf_jpg.seek(0)
+        _buf_png.seek(0)
 
     _buf_svg = io.BytesIO()
     _mide_fig.savefig(_buf_svg, format="svg", bbox_inches="tight")
