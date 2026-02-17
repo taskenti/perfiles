@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#  GPX ALTIMETRY STUDIO PRO  ·  v3.1
+#  GPX ALTIMETRY STUDIO PRO  ·  v3.2
 #  Features: HTML embed, slope gradient fill, social sizes, slope subgraph,
 #  sector table, km bands, WP shortcode, danger zones, 3D shadow, ITRA score,
 #  dual GPX compare, mini-map, auto-pass + auto-villages detection,
@@ -556,20 +556,40 @@ def build_static_fig(
         _label(total_km, float(ele_display[-1]), end_loc, ha="right")
 
     # ══════════════════════════════════════════════════════
-    # CAPA 6 — Waypoints
+    # CAPA 6 — Waypoints (respeta atributos por-waypoint del editor)
     # ══════════════════════════════════════════════════════
     for wp in waypoints:
+        # Atributos individuales (con fallback al global si no editado aún)
+        wp_rot  = wp.get("rotation", label_rotation)
+        wp_fs   = int(wp.get("fontsize", 8))
+        wp_vpos = wp.get("vpos", "Arriba")   # "Arriba" | "Abajo"
+
+        wp_rot_deg = 90 if wp_rot == "Vertical" else 0
+        wp_y_off   = padding * (1.0 if wp_rot == "Vertical" else 0.5)
+        # Posición vertical de la etiqueta
+        if wp_vpos == "Abajo":
+            txt_y  = wp["ele"] - wp_y_off
+            txt_va = "top"
+        else:
+            txt_y  = wp["ele"] + wp_y_off
+            txt_va = "bottom"
+
+        # Línea vertical punteada hasta la base
         ax.plot([wp["km"], wp["km"]], [base_fill, wp["ele"]],
                 color=text_color, linestyle=":", linewidth=0.9, alpha=0.35, zorder=4)
+
+        # Marcador con estilo
         st_ = WAYPOINT_DEFS.get(wp["icon_key"], WAYPOINT_DEFS["📍 Genérico"])
         ax.plot(wp["km"], wp["ele"],
                 marker=st_["marker"], color=st_["color"],
                 markersize=st_["size"], markeredgecolor=st_["edge"],
                 markeredgewidth=2.0, zorder=6)
+
+        # Etiqueta con atributos individuales
         wrapped = "\n".join(textwrap.wrap(wp["label"], width=14))
-        ax.text(wp["km"], wp["ele"] + y_offset_label, wrapped,
-                ha="center", va="bottom", rotation=rotation_deg,
-                fontsize=8, fontweight="bold", color=text_color,
+        ax.text(wp["km"], txt_y, wrapped,
+                ha="center", va=txt_va, rotation=wp_rot_deg,
+                fontsize=wp_fs, fontweight="bold", color=text_color,
                 bbox=dict(facecolor=bg_color, alpha=0.92, edgecolor="none",
                           pad=3, boxstyle="round,pad=0.35"), zorder=5)
 
@@ -833,7 +853,7 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
 
 with st.sidebar:
     st.markdown("## 🏔️ GPX Altimetry Studio")
-    st.caption("v3.1 · Pro Edition")
+    st.caption("v3.2 · Pro Edition")
     st.markdown("---")
 
     st.markdown("### 📁 Archivo principal")
@@ -1152,12 +1172,14 @@ with col_map:
                  for w in st.session_state["waypoints"]]
         wlats = [df_raw.iloc[int(np.argmin(np.abs(dist_arr-w["km"])))]["lat"]
                  for w in st.session_state["waypoints"]]
+        # Sin mode="text" en Scattermap para evitar el error CORS de maki icons
         fig_map.add_trace(go.Scattermap(
-            mode="markers+text",
+            mode="markers",
             lon=wlons, lat=wlats,
-            text=[f'{w["icon"]} {w["label"]}' for w in st.session_state["waypoints"]],
-            textposition="top right",
-            marker={"size": 11, "color": "#F97316"}, name="Waypoints",
+            marker={"size": 12, "color": "#F97316"},
+            name="Waypoints",
+            hovertext=[f'{w["icon"]} {w["label"]} · {w["km"]:.1f}km' for w in st.session_state["waypoints"]],
+            hoverinfo="text",
         ))
     fig_map.add_trace(go.Scattermap(
         mode="markers", lon=[sel_lon], lat=[sel_lat],
@@ -1188,26 +1210,152 @@ with col_add:
             st.success(f"✅ '{wp_name}' añadido")
             st.rerun()
 
-# Lista con borrar individual
+# ═══════════════════════════════════════════════════════════════════
+# EDITOR DE WAYPOINTS — edición inline de cada punto
+# ═══════════════════════════════════════════════════════════════════
 if st.session_state["waypoints"]:
-    st.markdown("**Waypoints activos:**")
+    st.markdown("**✏️ Editor de waypoints:**")
+
+    # Inicializar el índice de waypoint en edición
+    if "wp_edit_idx" not in st.session_state:
+        st.session_state["wp_edit_idx"] = None
+
     for i, wp in enumerate(st.session_state["waypoints"]):
-        cc1, cc2 = st.columns([6, 1])
-        cc1.markdown(
-            f'<span class="wp-chip">{wp["icon"]} <b>{wp["km"]:.1f} km</b>'
-            f' — {wp["label"]} <em>({wp["ele"]:.0f} m)</em></span>',
+        # ── Fila de resumen ──────────────────────────────────────────
+        row_cols = st.columns([0.4, 3.5, 1.2, 0.9, 0.9, 0.9])
+        row_cols[0].markdown(
+            f'<span style="font-size:1.3rem;line-height:2rem">{wp["icon"]}</span>',
             unsafe_allow_html=True,
         )
-        if cc2.button("✕", key=f"del_{i}"):
+        row_cols[1].markdown(
+            f'<span class="wp-chip"><b>{wp["km"]:.1f} km</b> — {wp["label"]}'
+            f' <em style="opacity:.6">({wp["ele"]:.0f} m)</em></span>',
+            unsafe_allow_html=True,
+        )
+        # Botón editar / cerrar
+        is_editing = st.session_state["wp_edit_idx"] == i
+        edit_label = "✏️ Editar" if not is_editing else "🔼 Cerrar"
+        if row_cols[2].button(edit_label, key=f"edit_btn_{i}", use_container_width=True):
+            st.session_state["wp_edit_idx"] = None if is_editing else i
+            st.rerun()
+        # Subir / bajar orden
+        if row_cols[3].button("▲", key=f"up_{i}", use_container_width=True) and i > 0:
+            st.session_state["waypoints"][i], st.session_state["waypoints"][i-1] = \
+                st.session_state["waypoints"][i-1], st.session_state["waypoints"][i]
+            if st.session_state["wp_edit_idx"] == i:
+                st.session_state["wp_edit_idx"] = i - 1
+            st.rerun()
+        if row_cols[4].button("▼", key=f"dn_{i}", use_container_width=True) \
+                and i < len(st.session_state["waypoints"]) - 1:
+            st.session_state["waypoints"][i], st.session_state["waypoints"][i+1] = \
+                st.session_state["waypoints"][i+1], st.session_state["waypoints"][i]
+            if st.session_state["wp_edit_idx"] == i:
+                st.session_state["wp_edit_idx"] = i + 1
+            st.rerun()
+        if row_cols[5].button("✕", key=f"del_{i}", use_container_width=True):
             st.session_state["waypoints"].pop(i)
+            if st.session_state["wp_edit_idx"] == i:
+                st.session_state["wp_edit_idx"] = None
             st.rerun()
 
-st.divider()
+        # ── Panel de edición (solo visible si está activo) ────────────
+        if is_editing:
+            with st.container():
+                st.markdown(
+                    '<div style="background:#f8fafc;border:1px solid #e2e8f0;'
+                    'border-radius:10px;padding:14px 18px;margin:4px 0 10px 0;">',
+                    unsafe_allow_html=True,
+                )
+                ec1, ec2, ec3 = st.columns([2, 2, 1])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# VISTA PREVIA INTERACTIVA  (Plotly)
-# ─────────────────────────────────────────────────────────────────────────────
-st.markdown('<div class="sec">👁️ Vista Previa Interactiva</div>', unsafe_allow_html=True)
+                # Nombre
+                new_label = ec1.text_input(
+                    "📝 Nombre del punto",
+                    value=wp["label"],
+                    key=f"ed_label_{i}",
+                )
+
+                # Tipo / icono
+                icon_keys = list(WAYPOINT_DEFS.keys())
+                cur_icon_idx = icon_keys.index(wp["icon_key"]) \
+                    if wp["icon_key"] in icon_keys else 0
+                new_icon_key = ec2.selectbox(
+                    "🏷️ Tipo / Icono",
+                    icon_keys,
+                    index=cur_icon_idx,
+                    key=f"ed_icon_{i}",
+                )
+
+                # Km (reposicionar)
+                _ed_max  = round(float(total_km), 1)
+                _ed_init = round(round(float(wp["km"]) / 0.1) * 0.1, 1)
+                _ed_init = min(max(_ed_init, 0.0), _ed_max)
+                new_km = ec3.number_input(
+                    "📍 km",
+                    min_value=0.0,
+                    max_value=float(total_km),
+                    value=float(wp["km"]),
+                    step=0.1,
+                    key=f"ed_km_{i}",
+                    format="%.1f",
+                )
+
+                ec4, ec5, ec6 = st.columns([2, 2, 1])
+
+                # Orientación etiqueta (por waypoint)
+                cur_rot = wp.get("rotation", label_rotation)
+                new_rot = ec4.radio(
+                    "↔️ Orientación etiqueta",
+                    ["Horizontal", "Vertical"],
+                    index=0 if cur_rot == "Horizontal" else 1,
+                    key=f"ed_rot_{i}",
+                    horizontal=True,
+                )
+
+                # Tamaño de fuente
+                cur_fs = wp.get("fontsize", 8)
+                new_fs = ec5.slider(
+                    "🔤 Tamaño texto",
+                    min_value=6, max_value=16,
+                    value=int(cur_fs), step=1,
+                    key=f"ed_fs_{i}",
+                )
+
+                # Posición vertical etiqueta
+                cur_vpos = wp.get("vpos", "Arriba")
+                new_vpos = ec6.selectbox(
+                    "↕️ Posición",
+                    ["Arriba", "Abajo"],
+                    index=0 if cur_vpos == "Arriba" else 1,
+                    key=f"ed_vpos_{i}",
+                )
+
+                # Botón aplicar
+                if st.button("💾 Aplicar cambios", key=f"ed_save_{i}",
+                             use_container_width=False):
+                    # Recalcular elevación si cambió el km
+                    idx_new = int(np.argmin(np.abs(dist_arr - new_km)))
+                    new_ele = float(ele_display[idx_new])
+
+                    st.session_state["waypoints"][i] = {
+                        **wp,
+                        "label":    new_label,
+                        "icon_key": new_icon_key,
+                        "icon":     WAYPOINT_DEFS[new_icon_key]["emoji"],
+                        "km":       float(new_km),
+                        "ele":      new_ele,
+                        "rotation": new_rot,
+                        "fontsize": new_fs,
+                        "vpos":     new_vpos,
+                    }
+                    st.session_state["wp_edit_idx"] = None
+                    st.success(f"✅ '{new_label}' actualizado")
+                    st.rerun()
+
+                st.markdown("</div>", unsafe_allow_html=True)
+
+
+st.divider()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VISTA PREVIA INTERACTIVA  (Plotly nativo — márgenes correctos)
@@ -1278,15 +1426,19 @@ if show_danger_zones:
             fig_prev.add_vrect(x0=_zs, x1=_ze, fillcolor="rgba(220,38,38,0.12)",
                                layer="below", line_width=0)
 
-# ── Waypoints ──
+# ── Waypoints — con posición de texto por-waypoint ──
 for _wp in st.session_state["waypoints"]:
-    _st = WAYPOINT_DEFS.get(_wp["icon_key"], WAYPOINT_DEFS["📍 Genérico"])
+    _st   = WAYPOINT_DEFS.get(_wp["icon_key"], WAYPOINT_DEFS["📍 Genérico"])
     _wlab = "<br>".join(textwrap.wrap(_wp["label"], 15))
+    _vpos = _wp.get("vpos", "Arriba")
+    _tpos = "bottom center" if _vpos == "Abajo" else "top center"
+    _fs   = int(_wp.get("fontsize", 11))  # Plotly usa tamaños distintos a MPL
     _padd(go.Scatter(
         x=[_wp["km"]], y=[_wp["ele"]],
         mode="markers+text",
         text=[f'{_st["emoji"]} {_wlab}'],
-        textposition="top center",
+        textposition=_tpos,
+        textfont=dict(size=_fs, color=_st["color"]),
         marker=dict(color=_st["color"], size=10, symbol="circle",
                     line=dict(color=_st["edge"], width=2)),
         showlegend=False,
@@ -1589,4 +1741,4 @@ with tab_batch:
         st.success(f"✅ {len(batch_files)} perfiles generados")
 
 st.divider()
-st.caption("GPX Altimetry Studio Pro v3.1 · Python + Streamlit + Matplotlib + Plotly")
+st.caption("GPX Altimetry Studio Pro v3.2 · Python + Streamlit + Matplotlib + Plotly")
