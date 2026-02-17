@@ -35,8 +35,9 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap');
-html, body, [class*="css"] { font-family: 'Syne', sans-serif; }
+/* Fuentes con display=swap para no bloquear render aunque la red sea lenta */
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&display=swap');
+html, body, [class*="css"] { font-family: 'Syne', system-ui, sans-serif; }
 h1 { font-weight: 800; letter-spacing: -0.03em; }
 .stMetric { background: #f8fafc; border-radius: 10px; padding: 12px 16px; border: 1px solid #e2e8f0; }
 .stMetric label { font-size: 0.72rem !important; color: #64748b !important; text-transform: uppercase; letter-spacing:.06em; }
@@ -54,7 +55,9 @@ div[data-testid="stSidebar"] h3 { color: #f1f5f9 !important; font-weight:700; }
 .badge-yellow { background:#fef9c3;color:#854d0e;border-radius:6px;padding:2px 8px;font-size:.78rem;font-weight:600; }
 .badge-orange { background:#ffedd5;color:#9a3412;border-radius:6px;padding:2px 8px;font-size:.78rem;font-weight:600; }
 .badge-red    { background:#fee2e2;color:#991b1b;border-radius:6px;padding:2px 8px;font-size:.78rem;font-weight:600; }
-.shortcode-box { background:#1e293b;color:#7dd3fc;font-family:'DM Mono',monospace;
+/* Shortcode box usa monospace del sistema — sin fuente web extra */
+.shortcode-box { background:#1e293b;color:#7dd3fc;
+                 font-family:ui-monospace,'Cascadia Code','Fira Code',monospace;
                  font-size:.8rem;padding:10px 14px;border-radius:8px;word-break:break-all; }
 </style>
 """, unsafe_allow_html=True)
@@ -855,7 +858,7 @@ with st.sidebar:
         bg_color    = c1.color_picker("Fondo",    st.session_state.get("_bc", "#FFFFFF"),  key="cp_bc")
         text_color  = c2.color_picker("Texto",    st.session_state.get("_tc", "#374151"),  key="cp_tc")
         line_width  = st.slider("Grosor línea", 0.5, 12.0, 2.5, 0.5)
-        fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.05)
+        fill_alpha  = st.slider("Opacidad",     0.0,  1.0, 0.65, 0.01)
 
     with st.expander("Opciones del gráfico", expanded=True):
         smooth_curve    = st.checkbox("Suavizado",         value=True)
@@ -1118,8 +1121,13 @@ with st.expander("⚙️ Config detección automática", expanded=False):
         help="Separación mínima entre puertos detectados")
 
 # ── Selector + mapa ──
-map_km_sel = st.slider("📍 Posición en ruta (km)", 0.0, float(total_km),
-                        float(total_km/2), 0.1, key="map_sel")
+# Snap del valor inicial al múltiplo de 0.1 más cercano para evitar el warning
+# "values property is in conflict with step/min/max" de Streamlit
+_map_max  = round(float(total_km), 1)
+_map_init = round(round(float(total_km / 2) / 0.1) * 0.1, 1)
+_map_init = min(_map_init, _map_max)  # nunca superar el máximo
+map_km_sel = st.slider("📍 Posición en ruta (km)", 0.0, _map_max,
+                        _map_init, 0.1, key="map_sel")
 idx_map = int(np.argmin(np.abs(dist_arr - map_km_sel)))
 sel_ele = float(ele_display[idx_map])
 sel_lat = float(df_raw.iloc[idx_map]['lat'])
