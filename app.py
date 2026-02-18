@@ -94,13 +94,13 @@ WAYPOINT_DEFS = {
     "🏥 Primeros Aux.":   {"emoji":"🏥","marker":"+", "color":"#F43F5E","edge":"#9F1239","size":14},
 }
 
-# Paleta de pendiente: colores suaves estilo Komoot 2024
-SLOPE_PALETTE = [
+# Paleta de pendiente: colores suaves estilo Komoot 2024 (INMUTABLE)
+SLOPE_PALETTE = (
     (-99,  3, "#10B981"),   # llano / bajadas → verde esmeralda suave
     (  3,  8, "#FCD34D"),   # moderado → ámbar cálido
     (  8, 18, "#FB923C"),   # empinado → coral
     ( 18, 99, "#DC2626"),   # extremo  → rojo intenso
-]
+)
 
 # Ventana de suavizado para el heatmap de pendiente (evita "arcoíris")
 _SLOPE_SMOOTH_W = 15   # puntos a promediar antes de clasificar color
@@ -117,6 +117,16 @@ def generate_palette_from_primary(primary: str) -> dict:
     Genera una paleta completa desde un color primario.
     Inspirado en sistemas de diseño modernos (Tailwind, Radix).
     """
+    # Validar hex de entrada
+    try:
+        h_clean = primary.strip("#")
+        if len(h_clean) != 6 or not all(c in "0123456789ABCDEFabcdef" for c in h_clean):
+            raise ValueError("Hex inválido")
+        int(h_clean, 16)  # verificar que parsea
+    except:
+        # Fallback al naranja Komoot si el hex es inválido
+        primary = "#f5811e"
+    
     def hex_to_hsl(h: str):
         h = h.strip("#")
         r, g, b = int(h[:2],16)/255, int(h[2:4],16)/255, int(h[4:6],16)/255
@@ -185,6 +195,32 @@ def hex_to_rgba(h: str, a: float) -> str:
 
 def file_hash(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()
+
+
+def safe_filename(file_obj, fallback="ruta") -> str:
+    """Extrae nombre seguro de file object, manejando None y extensiones."""
+    if file_obj is None:
+        return fallback
+    name = getattr(file_obj, "name", None)
+    if name is None:
+        return fallback
+    # Eliminar extensión .gpx (case insensitive)
+    return name.replace(".gpx", "").replace(".GPX", "")
+
+
+def sanitize_label(text: str, max_len: int = 50) -> str:
+    """
+    Sanitiza texto para uso seguro en matplotlib/plotly.
+    Elimina caracteres de control y escapa caracteres especiales.
+    """
+    import re
+    # Eliminar caracteres de control (0x00-0x1f, 0x7f-0x9f)
+    text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', text)
+    # Escapar caracteres especiales de LaTeX/matplotlib
+    text = text.replace('$', r'\$').replace('{', r'\{').replace('}', r'\}')
+    # Limitar longitud
+    text = text[:max_len]
+    return text.strip()
 
 
 def repair_gpx(s: str) -> str:
@@ -428,8 +464,8 @@ def build_mide_figure(
     CARD    = bg_color          # mismo fondo que el perfil normal
     # Texto e iconos de la tabla: text_color del usuario
     BLACK   = text_color
-    # Elementos secundarios: versión semitransparente del text_color
-    DGRAY   = text_color
+    # Elementos secundarios: versión semi-transparente (60% opacidad)
+    DGRAY   = text_color + "99" if len(text_color) == 7 else text_color
     # Bordes y rejilla: adaptados al modo oscuro/claro
     BORDER  = "#444444" if _dark_mode else "#888888"
     LGRAY   = "#333333" if _dark_mode else "#D0D0D0"
@@ -920,7 +956,7 @@ def build_static_fig(
     # ══════════════════════════════════════════════════════
     # CAPA 4 — Marcadores de km (FEATURE 6)
     # ══════════════════════════════════════════════════════
-    if show_km_markers:
+    if show_km_markers and km_interval < total_km:  # solo si hay espacio
         for km_mark in np.arange(km_interval, total_km, km_interval):
             idx_m = int(np.argmin(np.abs(dist_arr - km_mark)))
             xv = float(dist_arr[idx_m])
@@ -1032,16 +1068,19 @@ def build_static_fig(
         ax.set_title(chart_title, fontsize=13, fontweight="bold",
                      color=text_color, pad=6)
 
-    # ── Leyenda pendiente (4 categorías) ──
+    # ── Leyenda pendiente (generada dinámicamente desde SLOPE_PALETTE) ──
     if show_slope_heat and show_slope_legend:
-        legend_patches = [
-            mpatches.Patch(color="#22C55E", label="Llano / bajada (<3%)"),
-            mpatches.Patch(color="#F59E0B", label="Moderado (3–8%)"),
-            mpatches.Patch(color="#EF4444", label="Empinado (8–18%)"),
-            mpatches.Patch(color="#7C3AED", label="Extremo (>18%)"),
-        ]
+        legend_patches = []
+        for low, high, color in SLOPE_PALETTE:
+            if high == 99:
+                label = f"Extremo (>{low}%)"
+            elif low == -99:
+                label = f"Llano / bajada (<{high}%)"
+            else:
+                label = f"{low}–{high}%"
+            legend_patches.append(mpatches.Patch(color=color, label=label))
         ax.legend(handles=legend_patches, loc="upper right", fontsize=7,
-                  framealpha=0.85, edgecolor="#e2e8f0", ncol=2)
+                  framealpha=0.85, edgecolor=text_color, ncol=2)
 
     # ══════════════════════════════════════════════════════
     # EJES PRINCIPALES
@@ -1049,11 +1088,18 @@ def build_static_fig(
     ax.set_ylabel("Altitud (m)", color=text_color, fontsize=10, fontweight="bold")
     ax.tick_params(colors=text_color, labelsize=8)
     ax.set_ylim(base_fill, max_ele + padding * extra_top_factor)
-    # El eje X llega exactamente hasta el final del track.
-    # Si hay etiqueta de llegada, añadimos un margen visual mínimo (1%)
-    # para que la etiqueta no quede cortada por el borde del frame,
-    # pero el relleno y la línea siempre cubren hasta dist_arr[-1].
-    right_margin = 1.01 if end_loc else 1.0
+    
+    # Calcular margen derecho dinámicamente según longitud de etiqueta de llegada
+    if end_loc and label_rotation == "Vertical":
+        # Cada caracter vertical ocupa ~0.008 unidades de eje por punto de fontsize
+        _char_width_ratio = 0.009  # calibrado empíricamente
+        _needed_margin = (len(end_loc) * 9 * _char_width_ratio) / total_km
+        right_margin = 1.0 + max(_needed_margin, 0.02)  # mínimo 2%
+    elif end_loc:
+        right_margin = 1.015  # horizontal necesita menos
+    else:
+        right_margin = 1.0
+    
     ax.set_xlim(0, total_km * right_margin)
 
     if not show_slope_subgraph:
@@ -1296,6 +1342,10 @@ def build_html_embed(dist_arr, ele_display, df_raw, total_km,
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Defaults globales para evitar NameError en flujos edge-case
+if "transparent_bg" not in st.session_state:
+    st.session_state["transparent_bg"] = False
+
 with st.sidebar:
     # ── Carga del archivo — primera prioridad ──
     st.markdown("### 📁 Archivo GPX")
@@ -1362,9 +1412,11 @@ with st.sidebar:
         fill_alpha  = st.slider("Opacidad relleno", 0.0, 1.0, 0.65, 0.01)
         transparent_bg = st.checkbox(
             "🪟 Fondo transparente (PNG/SVG)",
-            value=False,
+            value=st.session_state.get("transparent_bg", False),
+            key="transparent_bg_check",
             help="Solo PNG y SVG. JPEG ignora esta opción."
         )
+        st.session_state["transparent_bg"] = transparent_bg  # persistir
 
     with st.expander("🌐 Embed WordPress", expanded=False):
         embed_width  = st.number_input("Ancho embed (px)", 400, 2000, 900, 50)
@@ -1519,21 +1571,29 @@ if _qa2.button("📉 Valle", use_container_width=True):
 
 if _qa3.button("⛰️ Puertos", use_container_width=True):
     passes = detect_passes(dist_arr, ele_display)
-    added = sum(1 for p in passes
-                if not any(abs(w["km"]-p["km"]) < 0.5 for w in st.session_state["waypoints"])
-                and not st.session_state["waypoints"].append(p))
-    if added: st.rerun()
-    else: st.toast("No se detectaron puertos significativos")
+    added = 0
+    for p in passes:
+        if not any(abs(w["km"]-p["km"]) < 0.5 for w in st.session_state["waypoints"]):
+            st.session_state["waypoints"].append(p)
+            added += 1
+    if added:
+        st.rerun()
+    else:
+        st.toast("⛰️ No se detectaron puertos nuevos", icon="ℹ️")
 
 if _qa4.button("🏘️ Pueblos", use_container_width=True):
     villages = detect_villages(dist_arr, ele_display,
                                min_drop=st.session_state.get("village_min_drop", 40.0),
                                min_dist_km=st.session_state.get("village_min_dist", 1.5))
-    added = sum(1 for v in villages
-                if not any(abs(w["km"]-v["km"]) < 0.5 for w in st.session_state["waypoints"])
-                and not st.session_state["waypoints"].append(v))
-    if added: st.rerun()
-    else: st.toast("No se detectaron valles habitados")
+    added = 0
+    for v in villages:
+        if not any(abs(w["km"]-v["km"]) < 0.5 for w in st.session_state["waypoints"]):
+            st.session_state["waypoints"].append(v)
+            added += 1
+    if added:
+        st.rerun()
+    else:
+        st.toast("🏘️ No se detectaron pueblos nuevos", icon="ℹ️")
 
 if _qa5.button("🔀 Ordenar", use_container_width=True):
     st.session_state["waypoints"].sort(key=lambda x: x["km"])
@@ -1802,7 +1862,7 @@ with _tab_map:
                 st.warning("⚠️ Ya existe un punto con ese nombre en esta posición")
             else:
                 st.session_state["waypoints"].append({
-                    "km": map_km_sel, "label": _wp_name.strip(), "ele": sel_ele,
+                    "km": map_km_sel, "label": sanitize_label(_wp_name.strip()), "ele": sel_ele,
                     "icon": WAYPOINT_DEFS[_wp_type]["emoji"], "icon_key": _wp_type,
                 })
                 st.success(f"✅ '{_wp_name}' añadido en km {map_km_sel:.1f}")
@@ -2096,7 +2156,7 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
 
     # Construir la figura
     _mide_fig = build_mide_figure(
-        route_name       = _ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else ""),
+        route_name       = _ct or safe_filename(uploaded_file),
         trip_type        = _trip_type,
         dist_km          = _m_dist,
         gain_m           = _m_gain,
@@ -2131,7 +2191,7 @@ with st.expander("🏔️ Generar Ficha MIDE", expanded=False):
     st.pyplot(_mide_fig, use_container_width=True)
 
     # Generar buffers en memoria
-    _fname_base = (_ct or (uploaded_file.name.replace(".gpx","") if uploaded_file else "MIDE")).replace(" ","_")
+    _fname_base = (_ct or safe_filename(uploaded_file, "MIDE")).replace(" ", "_")
 
     _buf_png = io.BytesIO()
     _mide_fig.savefig(_buf_png, format="png", dpi=150, bbox_inches="tight")
@@ -2241,7 +2301,7 @@ common_kwargs = dict(
     extra_top_factor=extra_top,
 )
 
-fn = uploaded_file.name.replace(".gpx", "")
+fn = safe_filename(uploaded_file)
 
 tab_std, tab_social, tab_html, tab_geojson, tab_batch = st.tabs([
     "🖼️ PNG / JPG / SVG",
@@ -2356,7 +2416,7 @@ with tab_batch:
                                     "min_ele","max_ele","gain","loss","max_slope",
                                     "start_loc","end_loc","chart_title","waypoints")},
                     start_loc="", end_loc="",
-                    chart_title=bf.name.replace(".gpx",""),
+                    chart_title=safe_filename(bf),
                     waypoints=[],
                 )
                 buf_b = io.BytesIO()
@@ -2365,7 +2425,7 @@ with tab_batch:
                               edgecolor="none", transparent=transparent_bg)
                 buf_b.seek(0)
                 plt.close(fig_b)
-                zf.writestr(bf.name.replace(".gpx","_perfil.png"), buf_b.getvalue())
+                zf.writestr(f"{safe_filename(bf)}_perfil.png", buf_b.getvalue())
                 prog.progress((bi+1)/len(batch_files))
         zip_buf.seek(0)
         st.download_button("📦 Descargar ZIP", zip_buf.getvalue(),
